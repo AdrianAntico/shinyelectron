@@ -4,19 +4,18 @@
 \alias{python_download_url}
 \title{Construct download URL for portable Python}
 \usage{
-python_download_url(
-  version,
-  platform = NULL,
-  arch = NULL,
-  release_date = "20250409"
-)
+python_download_url(version, platform = NULL, arch = NULL, release_date)
 }
 \arguments{
-\item{version}{Character string. Python version (e.g., "3.12.10").}
+\item{version}{Character string. Python version (e.g., "3.14.6").}
 
 \item{platform}{Character string. Target platform.}
 
 \item{arch}{Character string. Target architecture.}
+
+\item{release_date}{Character string. python-build-standalone release tag
+(YYYYMMDD). Required; must match a release tag on
+\url{https://github.com/astral-sh/python-build-standalone/releases}.}
 }
 \value{
 Character string. Download URL.

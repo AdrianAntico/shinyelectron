@@ -150,6 +150,11 @@ test_that("e2e: py-shiny auto-download writes Python runtime manifest", {
   on.exit(unlink(c(d, o), TRUE))
   writeLines("from shiny import App, ui\napp=App(ui.page_fluid(),None)", file.path(d, "app.py"))
   writeLines("shiny", file.path(d, "requirements.txt"))
+  # Avoid network access: return pin release for any version
+  local_mocked_bindings(
+    python_resolve_pbs = function(v) list(version = v, release = "20250101"),
+    .package = "shinyelectron"
+  )
   r <- export(d, o, app_type = "py-shiny", runtime_strategy = "auto-download",
               sign = FALSE, build = FALSE, overwrite = TRUE, verbose = FALSE)
   manifest_path <- fs::path(o, "shiny-app", "runtime-manifest.json")
@@ -372,4 +377,54 @@ test_that("export keeps build output when run_after fails", {
     "exited with an error"
   )
   expect_true(fs::dir_exists(file.path(destdir, "electron-app")))
+})
+
+# --- Container Version Baking ---
+
+test_that("e2e: r-shiny container Dockerfile encodes pinned R version, sysreqs, and install.packages", {
+  out <- withr::local_tempdir()
+
+  # Create app dependencies manifest consumed by bake_dockerfile_dependencies
+  app_dir <- fs::path(out, "src", "app")
+  fs::dir_create(app_dir, recurse = TRUE)
+  jsonlite::write_json(
+    list(language = "r", packages = list("shiny", "ggplot2")),
+    fs::path(app_dir, "dependencies.json"),
+    auto_unbox = TRUE
+  )
+
+  cfg <- list(
+    dependencies = list(
+      r = list(version = "4.5.1"),
+      system_packages = c("libfoo-dev")
+    )
+  )
+
+  # Avoid network sysreqs calls; libfoo-dev still comes from config escape hatch
+  local_mocked_bindings(
+    query_sysreqs = function(...) character(0),
+    .package = "shinyelectron"
+  )
+
+  copy_and_bake_dockerfiles(out, "r-shiny", config = cfg, verbose = FALSE)
+
+  dockerfile_path <- fs::path(out, "dockerfiles", "Dockerfile")
+  expect_true(fs::file_exists(dockerfile_path))
+  df_lines <- readLines(dockerfile_path)
+
+  # Base image is rocker/r-ver
+  expect_true(any(grepl("rocker/r-ver", df_lines)))
+
+  # ARG encodes the pinned R version
+  expect_true(any(grepl("^ARG R_VERSION=4\\.5\\.1$", df_lines)))
+
+  # config system_packages escape hatch reaches the apt RUN line
+  expect_true(any(grepl("libfoo-dev", df_lines)))
+
+  # R packages are installed via install.packages (not r-cran-*)
+  expect_true(any(grepl("install\\.packages", df_lines)))
+  expect_false(any(grepl("r-cran-", df_lines)))
+
+  # generate_container_config encodes the runtime version as the image tag
+  expect_equal(generate_container_config(cfg, "r-shiny")$container_tag, "4.5.1")
 })
