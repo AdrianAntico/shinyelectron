@@ -186,7 +186,6 @@ SHINYELECTRON_DEFAULTS <- list(
     show_phase_details = TRUE,
     error_show_logs = TRUE,
     shutdown_timeout = 10000L,
-    port_retry_count = 10L,
     custom_splash_html = NULL,
     custom_error_html = NULL,
     prompt_before_install = FALSE,
@@ -199,19 +198,3 @@ SHINYELECTRON_DEFAULTS <- list(
     one_click = TRUE
   )
 )
-
-#' Get a default value
-#'
-#' Retrieves a default value from SHINYELECTRON_DEFAULTS.
-#'
-#' @param key Character name of the default to retrieve
-#' @param default Value to return if key not found
-#' @return The default value
-#' @keywords internal
-get_default <- function(key, default = NULL) {
-  if (key %in% names(SHINYELECTRON_DEFAULTS)) {
-    SHINYELECTRON_DEFAULTS[[key]]
-  } else {
-    default
-  }
-}

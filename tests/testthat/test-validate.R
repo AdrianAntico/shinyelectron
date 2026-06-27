@@ -22,18 +22,6 @@ test_that("validate_python_app_structure checks for app.py", {
   expect_silent(validate_python_app_structure(tmpdir))
 })
 
-test_that("infer_runtime_strategy falls back to shinylive when unset", {
-  expect_equal(infer_runtime_strategy(NULL), "shinylive")
-  expect_equal(infer_runtime_strategy(NULL, "r-shiny"), "shinylive")
-  expect_equal(infer_runtime_strategy(NULL, "py-shiny"), "shinylive")
-})
-
-test_that("infer_runtime_strategy passes through an explicit strategy", {
-  expect_equal(infer_runtime_strategy("system"), "system")
-  expect_equal(infer_runtime_strategy("bundled"), "bundled")
-  expect_equal(infer_runtime_strategy("container"), "container")
-})
-
 test_that("validate_r_available succeeds when Rscript is found", {
   # R CMD check's R_check_bin/Rscript shim does not always round-trip cleanly
   # through processx, causing this test to fail in the sandbox even though
@@ -62,4 +50,70 @@ test_that("validate_r_available returns the resolved Rscript path", {
   mockery::stub(validate_r_available, "Sys.getenv", function(...) "checkmode")
   mockery::stub(validate_r_available, "Sys.which", function(...) "/usr/local/bin/Rscript")
   expect_equal(validate_r_available(), "/usr/local/bin/Rscript")
+})
+
+test_that("assert_safe_to_overwrite refuses protected dirs", {
+  expect_error(assert_safe_to_overwrite("/"), "protected")
+  expect_error(assert_safe_to_overwrite(normalizePath("~", mustWork = FALSE)), "protected")
+  expect_true(assert_safe_to_overwrite(withr::local_tempdir()))
+})
+
+# 4D-1: wizard platform validation
+test_that("wizard aborts for an invalid platform token", {
+  tmp <- withr::local_tempdir()
+  responses <- c("", "", "1", "1", "badplatform")
+  idx <- 0L
+  mockery::stub(wizard, "interactive", function() TRUE)
+  mockery::stub(wizard, "readline", function(...) {
+    idx <<- idx + 1L
+    if (idx <= length(responses)) responses[[idx]] else ""
+  })
+  expect_error(
+    capture.output(suppressMessages(wizard(tmp)), type = "output"),
+    "Invalid platform"
+  )
+})
+
+# 4D-2: enable_auto_updates rejects unsupported providers with a clear message
+test_that("enable_auto_updates rejects s3 provider with clear error", {
+  tmp <- withr::local_tempdir()
+  writeLines(
+    "app:\n  name: test\nbuild:\n  type: r-shiny\n  runtime_strategy: shinylive\n",
+    file.path(tmp, "_shinyelectron.yml")
+  )
+  expect_error(
+    enable_auto_updates(tmp, provider = "s3", owner = "x", repo = "y"),
+    "not yet supported"
+  )
+})
+
+test_that("enable_auto_updates rejects generic provider with clear error", {
+  tmp <- withr::local_tempdir()
+  writeLines(
+    "app:\n  name: test\nbuild:\n  type: r-shiny\n  runtime_strategy: shinylive\n",
+    file.path(tmp, "_shinyelectron.yml")
+  )
+  expect_error(
+    enable_auto_updates(tmp, provider = "generic", owner = "x", repo = "y"),
+    "not yet supported"
+  )
+})
+
+# 4D-3: scalar guards in validate_config
+test_that("validate_config warns clearly for a length-2 window width", {
+  cfg <- list(window = list(width = c(1200, 800)))
+  expect_warning(validated <- validate_config(cfg), "window.width")
+  expect_equal(validated$window$width, SHINYELECTRON_DEFAULTS$window_width)
+})
+
+test_that("validate_config warns clearly for a list window height", {
+  cfg <- list(window = list(height = list(800, 600)))
+  expect_warning(validated <- validate_config(cfg), "window.height")
+  expect_equal(validated$window$height, SHINYELECTRON_DEFAULTS$window_height)
+})
+
+test_that("validate_config warns clearly for a length-2 server port", {
+  cfg <- list(server = list(port = c(3838, 3839)))
+  expect_warning(validated <- validate_config(cfg), "server.port")
+  expect_equal(validated$server$port, SHINYELECTRON_DEFAULTS$server_port)
 })

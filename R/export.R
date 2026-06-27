@@ -215,16 +215,7 @@ export <- function(appdir, destdir, app_name = NULL, app_type = NULL,
       ))
     } else {
       if (verbose) cli::cli_alert_warning("Overwriting existing directory: {.path {destdir}}")
-      # Safety check: refuse to overwrite critical system directories
-      abs_dest <- normalizePath(destdir, mustWork = FALSE)
-      protected <- c(
-        normalizePath("~", mustWork = FALSE),
-        normalizePath("/", mustWork = FALSE),
-        normalizePath(R.home(), mustWork = FALSE)
-      )
-      if (abs_dest %in% protected || nchar(abs_dest) <= 3) {
-        cli::cli_abort("Refusing to overwrite protected directory: {.path {destdir}}")
-      }
+      assert_safe_to_overwrite(destdir)
       unlink(destdir, recursive = TRUE)
     }
   }
@@ -236,7 +227,7 @@ export <- function(appdir, destdir, app_name = NULL, app_type = NULL,
 
   result <- list()
 
-  tryCatch({
+  result <- tryCatch({
     # Step 1: Convert or stage application files
     if (runtime_strategy == "shinylive") {
       converted_app_dir <- convert_app_to_shinylive(
@@ -277,39 +268,10 @@ export <- function(appdir, destdir, app_name = NULL, app_type = NULL,
       result$electron_app <- built_app_dir
     }
 
-    # Step 3: Run application in development mode if requested
-    if (run_after && build) {
-      if (verbose) cli::cli_alert_info("Starting application in development mode...")
-
-      run_electron_app(
-        app_dir = result$electron_app,
-        verbose = verbose
-      )
-    }
-
-    # Step 4: Open output directory if requested
-    if (open_after) {
-      if (verbose) cli::cli_alert_info("Opening output directory...")
-      utils::browseURL(destdir)
-    }
-
-    if (verbose) {
-      cli::cli_alert_success("Successfully exported Shiny application to Electron!")
-      cli::cli_alert_info("Output directory: {.path {destdir}}")
-
-      if (build) {
-        cli::cli_alert_info("Electron app: {.path {result$electron_app}}")
-        if (fs::dir_exists(fs::path(result$electron_app, "dist"))) {
-          cli::cli_alert_info("Distributables: {.path {fs::path(result$electron_app, 'dist')}}")
-        }
-      }
-    }
-
-    return(result)
-
+    result
   }, error = function(e) {
-    # Remove the partially populated output so a retry does not require
-    # overwrite = TRUE (only the directory this call created).
+    # Remove only the partial output this call created, so a retry does not
+    # require overwrite = TRUE.
     if (isTRUE(created_destdir) && fs::dir_exists(destdir)) {
       unlink(destdir, recursive = TRUE)
     }
@@ -318,4 +280,43 @@ export <- function(appdir, destdir, app_name = NULL, app_type = NULL,
       "x" = "Error: {e$message}"
     ), parent = e)
   })
+
+  # The build output is committed past this point. Post-build actions must
+  # never delete it, so they run OUTSIDE the cleanup tryCatch above.
+  if (verbose) {
+    cli::cli_alert_success("Successfully exported Shiny application to Electron!")
+    cli::cli_alert_info("Output directory: {.path {destdir}}")
+    if (build) {
+      cli::cli_alert_info("Electron app: {.path {result$electron_app}}")
+      if (fs::dir_exists(fs::path(result$electron_app, "dist"))) {
+        cli::cli_alert_info("Distributables: {.path {fs::path(result$electron_app, 'dist')}}")
+      }
+    }
+  }
+
+  # Run in dev mode if requested. A non-zero Electron exit must not destroy the
+  # successful build, so failures warn rather than abort.
+  if (run_after && build) {
+    if (verbose) cli::cli_alert_info("Starting application in development mode...")
+    tryCatch(
+      run_electron_app(app_dir = result$electron_app, verbose = verbose),
+      error = function(e) cli::cli_warn(c(
+        "The application exited with an error (the build output was kept).",
+        "i" = conditionMessage(e)
+      ))
+    )
+  }
+
+  if (open_after) {
+    if (verbose) cli::cli_alert_info("Opening output directory...")
+    tryCatch(
+      utils::browseURL(destdir),
+      error = function(e) cli::cli_warn(c(
+        "Could not open the output directory (the build output was kept).",
+        "i" = conditionMessage(e)
+      ))
+    )
+  }
+
+  result
 }

@@ -37,8 +37,7 @@ default_config <- function() {
       linux = NULL
     ),
     nodejs = list(
-      version = NULL,
-      auto_install = FALSE
+      version = NULL
     ),
     dependencies = SHINYELECTRON_DEFAULTS$dependencies,
     container = SHINYELECTRON_DEFAULTS$container,
@@ -123,16 +122,22 @@ merge_config_deep <- function(defaults, config) {
     return(defaults)
   }
 
+  # Only recurse into map-like (fully named) lists. Unnamed YAML sequences
+  # (repos, index_urls, package lists) and scalars must override the default
+  # wholesale; recursing into them would iterate an empty `names()` and
+  # silently return the default, discarding the user's value.
+  is_named_list <- function(x) {
+    is.list(x) && !is.null(names(x)) && all(nzchar(names(x)))
+  }
+
   result <- defaults
 
   for (name in names(config)) {
     if (name %in% names(defaults) &&
-        is.list(defaults[[name]]) &&
-        is.list(config[[name]])) {
-      # Recursively merge nested lists
+        is_named_list(defaults[[name]]) &&
+        is_named_list(config[[name]])) {
       result[[name]] <- merge_config_deep(defaults[[name]], config[[name]])
     } else {
-      # Override with config value
       result[[name]] <- config[[name]]
     }
   }
@@ -215,18 +220,26 @@ validate_config <- function(config) {
   default_width <- SHINYELECTRON_DEFAULTS$window_width
   default_height <- SHINYELECTRON_DEFAULTS$window_height
 
-  if (!is.null(config$window$width) && (!is.numeric(config$window$width) || config$window$width < 100)) {
+  if (!is.null(config$window$width) && (
+      !is.numeric(config$window$width) ||
+      length(config$window$width) != 1 ||
+      config$window$width < 100
+  )) {
     cli::cli_warn(c(
       "Invalid {.field window.width} in config: {.val {config$window$width}}",
-      "i" = "Must be a number >= 100; using default: {.val {default_width}}",
+      "i" = "Must be a single number >= 100; using default: {.val {default_width}}",
       "i" = "Edit {.field window.width} in {.file _shinyelectron.yml}"
     ))
     config$window$width <- default_width
   }
-  if (!is.null(config$window$height) && (!is.numeric(config$window$height) || config$window$height < 100)) {
+  if (!is.null(config$window$height) && (
+      !is.numeric(config$window$height) ||
+      length(config$window$height) != 1 ||
+      config$window$height < 100
+  )) {
     cli::cli_warn(c(
       "Invalid {.field window.height} in config: {.val {config$window$height}}",
-      "i" = "Must be a number >= 100; using default: {.val {default_height}}",
+      "i" = "Must be a single number >= 100; using default: {.val {default_height}}",
       "i" = "Edit {.field window.height} in {.file _shinyelectron.yml}"
     ))
     config$window$height <- default_height
@@ -235,10 +248,11 @@ validate_config <- function(config) {
   # Validate port using centralized default
   default_port <- SHINYELECTRON_DEFAULTS$server_port
   if (!is.null(config$server$port)) {
-    if (!is.numeric(config$server$port) || config$server$port < 1 || config$server$port > 65535) {
+    if (!is.numeric(config$server$port) || length(config$server$port) != 1 ||
+        config$server$port < 1 || config$server$port > 65535) {
       cli::cli_warn(c(
         "Invalid {.field server.port} in config: {.val {config$server$port}}",
-        "i" = "Must be an integer between 1 and 65535; using default: {.val {default_port}}",
+        "i" = "Must be a single integer between 1 and 65535; using default: {.val {default_port}}",
         "i" = "Edit {.field server.port} in {.file _shinyelectron.yml}"
       ))
       config$server$port <- default_port
@@ -292,6 +306,20 @@ validate_config <- function(config) {
     }
   }
 
+  # Validate container engine against the canonical set. An invalid value in
+  # the config file warns and falls back to the default rather than aborting
+  # the build later (mirrors the runtime_strategy check above).
+  valid_engines <- SHINYELECTRON_DEFAULTS$valid_container_engines
+  if (!is.null(config$container) && !is.null(config$container$engine) &&
+      !config$container$engine %in% valid_engines) {
+    cli::cli_warn(c(
+      "Invalid container engine in config: {.val {config$container$engine}}",
+      "i" = "Valid engines: {.val {valid_engines}}",
+      "i" = "Falling back to the default engine ({.val {SHINYELECTRON_DEFAULTS$container$engine}})"
+    ))
+    config$container$engine <- NULL
+  }
+
   config
 }
 
@@ -336,8 +364,10 @@ init_config <- function(appdir, app_name = NULL, overwrite = FALSE, verbose = TR
     app_name <- basename(appdir)
   }
 
-  # Sanitize app name for YAML
-  app_name_safe <- gsub('"', '\\"', app_name)
+  # Escape app_name for a YAML double-quoted scalar.
+  # Backslashes must be escaped first (\\ -> \\\\), then double-quotes (" -> \").
+  app_name_safe <- gsub("\\", "\\\\", app_name, fixed = TRUE)
+  app_name_safe <- gsub('"', '\\"', app_name_safe, fixed = TRUE)
 
   # Template content with all configuration sections
   template <- '# shinyelectron configuration file
@@ -385,8 +415,9 @@ server:
 nodejs:
   # Version to install (null = latest LTS)
   version: null
-  # Set to true to auto-install Node.js if not found
-  auto_install: false
+  # auto_install is planned but not yet active; a missing Node.js aborts the build.
+  # When ready, set auto_install: true to let export() install Node.js automatically.
+  # auto_install: false
 
 # Dependency configuration
 # Controls how R/Python package dependencies are handled
@@ -494,7 +525,6 @@ nodejs:
 #   show_phase_details: true
 #   error_show_logs: true
 #   shutdown_timeout: 10000
-#   port_retry_count: 10
 #   custom_splash_html: null
 #   custom_error_html: null
 #   prompt_before_install: false  # true = ask before installing packages
@@ -644,8 +674,7 @@ show_config <- function(appdir = ".") {
   cli::cli_bullets(c(
     "*" = "Prompt before install: {.val {isTRUE(lifecycle$prompt_before_install)}}",
     "*" = "Prompt runtime version: {.val {isTRUE(lifecycle$prompt_runtime_version)}}",
-    "*" = "Custom splash: {.val {!is.null(lifecycle$custom_splash_html)}}",
-    "*" = "Port retry count: {.val {lifecycle$port_retry_count %||% 10}}"
+    "*" = "Custom splash: {.val {!is.null(lifecycle$custom_splash_html)}}"
   ))
 
   invisible(config)

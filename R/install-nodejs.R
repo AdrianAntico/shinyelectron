@@ -375,46 +375,67 @@ install_nodejs <- function(version = NULL, platform = NULL, arch = NULL,
     if (verbose) cli::cli_alert_success("Checksum verified")
   }
 
-  # Extract archive
+  # Extract archive atomically: extract into a staging directory first, then
+  # swap into place only on success.  This preserves the prior install if a
+  # forced reinstall fails mid-extraction.
   if (verbose) cli::cli_alert_info("Extracting archive...")
 
-  # Ensure parent directory exists
-  fs::dir_create(dirname(install_dir), recurse = TRUE)
-
-  # Remove existing if force reinstall
-  if (fs::dir_exists(install_dir)) {
-    unlink(install_dir, recursive = TRUE)
-  }
+  staging_dir <- paste0(install_dir, ".staging-", Sys.getpid())
+  if (fs::dir_exists(staging_dir)) unlink(staging_dir, recursive = TRUE)
+  fs::dir_create(staging_dir, recurse = TRUE)
+  on.exit(unlink(staging_dir, recursive = TRUE), add = TRUE)
 
   if (platform == "win") {
-    utils::unzip(archive_path, exdir = dirname(install_dir))
-    # Find extracted directory name
+    tryCatch(
+      utils::unzip(archive_path, exdir = staging_dir),
+      error = function(e) cli::cli_abort(c(
+        "Failed to extract Node.js v{version}",
+        "x" = "Error: {e$message}"
+      ))
+    )
     extracted_name <- gsub("\\.zip$", "", filename)
-    extracted_path <- fs::path(dirname(install_dir), extracted_name)
-
-    if (fs::dir_exists(extracted_path)) {
-      fs::file_move(extracted_path, install_dir)
-    }
   } else {
-    utils::untar(archive_path, exdir = dirname(install_dir), tar = "internal")
-    # Find extracted directory name
+    tryCatch(
+      utils::untar(archive_path, exdir = staging_dir, tar = "internal"),
+      error = function(e) cli::cli_abort(c(
+        "Failed to extract Node.js v{version}",
+        "x" = "Error: {e$message}"
+      ))
+    )
     extracted_name <- gsub("\\.tar\\.gz$", "", filename)
-    extracted_path <- fs::path(dirname(install_dir), extracted_name)
+  }
+  extracted_path <- fs::path(staging_dir, extracted_name)
 
-    if (fs::dir_exists(extracted_path)) {
-      fs::file_move(extracted_path, install_dir)
-    }
+  if (!fs::dir_exists(extracted_path)) {
+    cli::cli_abort(c(
+      "Failed to extract Node.js v{version}",
+      "x" = "Expected directory not found in archive",
+      "i" = "Expected: {.path {extracted_path}}"
+    ))
   }
 
-  # Verify installation (against the target platform/arch, not the host)
-  node_exe <- nodejs_executable(version, platform, arch)
-  if (is.null(node_exe) || !fs::file_exists(node_exe)) {
+  # Verify the node executable is present inside the STAGING directory BEFORE
+  # the destructive swap.  A structurally-valid but incomplete archive
+  # (correct top-level dir name, missing the binary) would otherwise replace a
+  # working prior install before the abort fires.  on.exit() still removes the
+  # staging dir on this abort path.
+  staged_node_exe <- if (platform == "win") {
+    fs::path(extracted_path, "node.exe")
+  } else {
+    fs::path(extracted_path, "bin", "node")
+  }
+  if (!fs::file_exists(staged_node_exe)) {
     cli::cli_abort(c(
       "Installation failed",
       "x" = "Node.js executable not found after extraction",
       "i" = "Expected at: {.path {install_dir}}"
     ))
   }
+
+  # Atomic swap: destroy the old install only after staging is verified.
+  fs::dir_create(dirname(install_dir), recurse = TRUE)
+  if (fs::dir_exists(install_dir)) unlink(install_dir, recursive = TRUE)
+  fs::file_move(extracted_path, install_dir)
 
   if (verbose) {
     cli::cli_alert_success("Node.js v{version} installed successfully")
@@ -425,32 +446,4 @@ install_nodejs <- function(version = NULL, platform = NULL, arch = NULL,
   }
 
   invisible(install_dir)
-}
-
-#' Remove Node.js installation
-#'
-#' @param version Character version to remove. If NULL, removes all versions.
-#' @param verbose Logical whether to show progress. Default TRUE.
-#' @return Invisible NULL
-#' @keywords internal
-nodejs_remove <- function(version = NULL, verbose = TRUE) {
-  if (is.null(version)) {
-    # Remove all
-    base_path <- nodejs_install_path()
-    if (fs::dir_exists(base_path)) {
-      fs::dir_delete(base_path)
-      if (verbose) cli::cli_alert_success("Removed all Node.js installations")
-    }
-  } else {
-    # Remove specific version (all platforms)
-    base_path <- nodejs_install_path()
-    version_path <- fs::path(base_path, paste0("v", version))
-
-    if (fs::dir_exists(version_path)) {
-      fs::dir_delete(version_path)
-      if (verbose) cli::cli_alert_success("Removed Node.js v{version}")
-    }
-  }
-
-  invisible(NULL)
 }

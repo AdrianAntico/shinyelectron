@@ -11,7 +11,7 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const backend = require('./backends/{{backend_module}}');
@@ -19,7 +19,7 @@ const backend = require('./backends/{{backend_module}}');
 // File logging -- writes to configured log directory or app userData
 const LOG_LEVEL = '{{log_level}}';
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
-const LOG_THRESHOLD = LOG_LEVELS[LOG_LEVEL] || 1;
+const LOG_THRESHOLD = LOG_LEVEL in LOG_LEVELS ? LOG_LEVELS[LOG_LEVEL] : 1;
 
 const logDir = '{{log_dir}}' || path.join(app.getPath('userData'), 'logs');
 let logStream = null;
@@ -100,6 +100,7 @@ function scheduleSaveWindowState() {
 }
 {{#tray_enabled}}
 let tray = null;
+let trayMenu = null;
 {{/tray_enabled}}
 
 {{#tray_enabled}}
@@ -118,7 +119,7 @@ function createTray() {
   tray = new Tray(trayIcon);
   tray.setToolTip('{{tray_tooltip}}');
 
-  const contextMenu = Menu.buildFromTemplate([
+  trayMenu = Menu.buildFromTemplate([
     {
       label: 'Status: Starting...',
       enabled: false,
@@ -144,7 +145,7 @@ function createTray() {
     }
   ]);
 
-  tray.setContextMenu(contextMenu);
+  tray.setContextMenu(trayMenu);
 
   tray.on('double-click', () => {
     if (mainWindow) {
@@ -426,12 +427,37 @@ function setupAutoUpdater() {
 {{/updates_enabled}}
 
 function createWindow() {
-  // Restore saved window state or use defaults
+  // Restore saved window state or use defaults.
+  // Only apply saved x/y when the saved bounds are visible on at least one
+  // currently connected display; a disconnected monitor would otherwise hide
+  // the window off-screen with no way for the user to recover it.
   const savedState = loadWindowState();
   const windowWidth = (savedState && savedState.bounds) ? savedState.bounds.width : {{window_width}};
   const windowHeight = (savedState && savedState.bounds) ? savedState.bounds.height : {{window_height}};
-  const windowX = (savedState && savedState.bounds) ? savedState.bounds.x : undefined;
-  const windowY = (savedState && savedState.bounds) ? savedState.bounds.y : undefined;
+
+  let windowX = undefined;
+  let windowY = undefined;
+  if (savedState && savedState.bounds) {
+    const { x, y, width, height } = savedState.bounds;
+    try {
+      const displays = screen.getAllDisplays();
+      const visible = displays.some(d => {
+        const wa = d.workArea;
+        // Intersection test: both rectangles must overlap by at least 1px
+        return x < wa.x + wa.width && x + width > wa.x &&
+               y < wa.y + wa.height && y + height > wa.y;
+      });
+      if (visible) {
+        windowX = x;
+        windowY = y;
+      }
+      // If not visible on any display, leave windowX/windowY undefined so
+      // Electron centers the window on the primary display.
+    } catch {
+      // screen API unavailable (should not happen after app.whenReady);
+      // fall back to centered window.
+    }
+  }
 
   // Create the browser window
   mainWindow = new BrowserWindow({
@@ -505,6 +531,18 @@ function createWindow() {
       else if (data.phase === 'checking_packages') statusText = 'Checking packages...';
 
       tray.setToolTip('{{app_name}} - ' + statusText);
+      // Also update the Status menu item label so the context menu reflects
+      // the current state (guards against older Electron builds missing
+      // getMenuItemById by wrapping in try/catch).
+      try {
+        if (trayMenu) {
+          const statusItem = trayMenu.getMenuItemById('status');
+          if (statusItem) {
+            statusItem.label = 'Status: ' + statusText;
+            tray.setContextMenu(trayMenu);
+          }
+        }
+      } catch { /* menu update is best-effort */ }
     }
     {{/tray_enabled}}
   });
@@ -557,6 +595,28 @@ function createWindow() {
       }
       if (data.phase === 'server_ready') serverRunning = true;
       if (data.phase === 'stopping_server' || data.phase === 'error' || data.phase === 'server_crashed') serverRunning = false;
+      // Update tray status for multi-app mode (mirrors the single-app handler)
+      {{#tray_enabled}}
+      if (tray) {
+        var statusText = 'Starting...';
+        if (data.phase === 'server_ready') statusText = 'Running';
+        else if (data.phase === 'error' || data.phase === 'server_crashed') statusText = 'Error';
+        else if (data.phase === 'shutting_down') statusText = 'Shutting down...';
+        else if (data.phase === 'finding_runtime') statusText = 'Finding runtime...';
+        else if (data.phase === 'installing_packages') statusText = 'Installing packages...';
+        else if (data.phase === 'checking_packages') statusText = 'Checking packages...';
+        tray.setToolTip((selectedApp.name || '{{app_name}}') + ' - ' + statusText);
+        try {
+          if (trayMenu) {
+            var statusItem = trayMenu.getMenuItemById('status');
+            if (statusItem) {
+              statusItem.label = 'Status: ' + statusText;
+              tray.setContextMenu(trayMenu);
+            }
+          }
+        } catch { /* menu update is best-effort */ }
+      }
+      {{/tray_enabled}}
     });
     // Defensive: never let an 'error' event with no listener crash the process.
     currentBackend.on('error', function(err) {
@@ -618,13 +678,13 @@ function createWindow() {
     } else if (actionType === 'quit') {
       app.quit();
     } else if (actionType === 'install') {
-      backend.emit('install-packages', {
+      (currentBackend || backend).emit('install-packages', {
         libPath: action.libPath || 'system'
       });
     } else if (actionType === 'skip_install') {
-      backend.emit('skip-install');
+      (currentBackend || backend).emit('skip-install');
     } else if (actionType === 'select_runtime') {
-      backend.emit('runtime-selected', { runtimePath: action.runtimePath });
+      (currentBackend || backend).emit('runtime-selected', { runtimePath: action.runtimePath });
     } else if (actionType === 'select_app') {
       lastSelectedAppId = action.appId;
       startSelectedApp(action.appId);

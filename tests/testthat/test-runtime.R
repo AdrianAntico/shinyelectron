@@ -159,3 +159,225 @@ test_that("generate_python_runtime_manifest creates valid JSON", {
   expect_equal(parsed$platform, "mac")
   expect_equal(parsed$arch, "arm64")
 })
+
+# --- install_nodejs: atomic extraction preserves prior install on failure ---
+
+test_that("install_nodejs preserves prior install when extraction fails", {
+  tmp <- withr::local_tempdir()
+  # Build a realistic install_dir path matching nodejs_install_path() layout.
+  install_dir <- file.path(tmp, "nodejs", "v22.0.0", "darwin-arm64")
+  dir.create(install_dir, recursive = TRUE)
+  # Sentinel file representing a working prior install.
+  writeLines("prior", file.path(install_dir, "node"))
+
+  # Stub platform/arch detection and path resolution to use tmp.
+  mockery::stub(install_nodejs, "detect_current_platform", function() "mac")
+  mockery::stub(install_nodejs, "detect_current_arch", function() "arm64")
+  mockery::stub(install_nodejs, "nodejs_install_path",
+                function(v, p, a) file.path(tmp, "nodejs", paste0("v", v), "darwin-arm64"))
+  mockery::stub(install_nodejs, "utils::download.file",
+                function(url, dest, ...) invisible(file.create(dest)))
+  mockery::stub(install_nodejs, "nodejs_download_checksums", function(v) character(0))
+  # Stub extraction to fail so we can confirm prior install is untouched.
+  mockery::stub(install_nodejs, "utils::untar",
+                function(...) stop("simulated extraction failure"))
+
+  expect_error(
+    install_nodejs(version = "22.0.0", force = TRUE, verbose = FALSE),
+    "simulated extraction failure"
+  )
+
+  # The sentinel from the prior install must still be present.
+  expect_true(file.exists(file.path(install_dir, "node")))
+})
+
+test_that("install_nodejs preserves prior install when node binary missing from archive", {
+  # RED before fix: verify-after-swap meant the prior install was already
+  # destroyed when the abort fired.
+  # GREEN after fix: verify-before-swap keeps the prior install intact.
+  tmp <- withr::local_tempdir()
+  install_dir <- file.path(tmp, "nodejs", "v22.0.0", "darwin-arm64")
+  dir.create(install_dir, recursive = TRUE)
+  # Sentinel file representing a working prior install.
+  writeLines("prior", file.path(install_dir, "sentinel"))
+
+  mockery::stub(install_nodejs, "detect_current_platform", function() "mac")
+  mockery::stub(install_nodejs, "detect_current_arch", function() "arm64")
+  mockery::stub(install_nodejs, "nodejs_install_path",
+                function(v, p, a) file.path(tmp, "nodejs", paste0("v", v), "darwin-arm64"))
+  mockery::stub(install_nodejs, "utils::download.file",
+                function(url, dest, ...) invisible(file.create(dest)))
+  mockery::stub(install_nodejs, "nodejs_download_checksums", function(v) character(0))
+  # Extraction creates the top-level dir (correct structure) but omits bin/node,
+  # simulating a structurally-valid but incomplete archive.
+  mockery::stub(install_nodejs, "utils::untar", function(tarfile, exdir, ...) {
+    extracted <- file.path(exdir, "node-v22.0.0-darwin-arm64")
+    dir.create(file.path(extracted, "bin"), recursive = TRUE)
+    # node binary intentionally absent
+    invisible(NULL)
+  })
+
+  expect_error(
+    install_nodejs(version = "22.0.0", force = TRUE, verbose = FALSE),
+    "Node.js executable not found"
+  )
+
+  # The prior install directory and its sentinel must still be present.
+  expect_true(dir.exists(install_dir))
+  expect_true(file.exists(file.path(install_dir, "sentinel")))
+})
+
+# --- download_and_extract_portable_tool: abort when executable missing ---
+
+# --- resolve_backend_module: correct backend module for each strategy/type ---
+
+test_that("resolve_backend_module returns shinylive.js for shinylive strategy", {
+  expect_equal(resolve_backend_module("r-shiny",  "shinylive"), "shinylive.js")
+  expect_equal(resolve_backend_module("py-shiny", "shinylive"), "shinylive.js")
+})
+
+test_that("resolve_backend_module returns native-r.js for r-* types with native strategies", {
+  expect_equal(resolve_backend_module("r-shiny", "system"),        "native-r.js")
+  expect_equal(resolve_backend_module("r-shiny", "bundled"),       "native-r.js")
+  expect_equal(resolve_backend_module("r-shiny", "auto-download"), "native-r.js")
+})
+
+test_that("resolve_backend_module returns native-py.js for py-* types with native strategies", {
+  expect_equal(resolve_backend_module("py-shiny", "system"),        "native-py.js")
+  expect_equal(resolve_backend_module("py-shiny", "bundled"),       "native-py.js")
+  expect_equal(resolve_backend_module("py-shiny", "auto-download"), "native-py.js")
+})
+
+test_that("resolve_backend_module returns container.js for container strategy", {
+  expect_equal(resolve_backend_module("r-shiny",  "container"), "container.js")
+  expect_equal(resolve_backend_module("py-shiny", "container"), "container.js")
+})
+
+test_that("resolve_backend_module aborts for unknown runtime strategy", {
+  expect_error(
+    resolve_backend_module("r-shiny", "unknown-strategy"),
+    "Unknown runtime strategy"
+  )
+})
+
+# --- build_electron_app: multi-platform abort guard ---
+
+test_that("build_electron_app aborts for bundled strategy with multiple platforms", {
+  tmp <- withr::local_tempdir()
+  out <- file.path(tmp, "out")
+  expect_error(
+    build_electron_app(tmp, out, app_name = "test", app_type = "r-shiny",
+                       runtime_strategy = "bundled",
+                       platform = c("mac", "win"), arch = "x64",
+                       verbose = FALSE),
+    "one platform and architecture"
+  )
+})
+
+test_that("build_electron_app aborts for bundled strategy with multiple architectures", {
+  tmp <- withr::local_tempdir()
+  out <- file.path(tmp, "out")
+  expect_error(
+    build_electron_app(tmp, out, app_name = "test", app_type = "r-shiny",
+                       runtime_strategy = "bundled",
+                       platform = "mac", arch = c("x64", "arm64"),
+                       verbose = FALSE),
+    "one platform and architecture"
+  )
+})
+
+test_that("build_electron_app aborts for auto-download strategy with multiple platforms", {
+  tmp <- withr::local_tempdir()
+  out <- file.path(tmp, "out")
+  expect_error(
+    build_electron_app(tmp, out, app_name = "test", app_type = "py-shiny",
+                       runtime_strategy = "auto-download",
+                       platform = c("mac", "win"), arch = "x64",
+                       verbose = FALSE),
+    "one platform and architecture"
+  )
+})
+
+test_that("build_electron_app does not abort for system strategy with multiple platforms", {
+  tmp <- withr::local_tempdir()
+  out <- file.path(tmp, "out")
+  mockery::stub(build_electron_app, "validate_node_npm", function(...) stop("PAST_GUARD"))
+  expect_error(
+    build_electron_app(tmp, out, app_name = "test", app_type = "r-shiny",
+                       runtime_strategy = "system",
+                       platform = c("mac", "win"), arch = "x64",
+                       verbose = FALSE),
+    "PAST_GUARD"
+  )
+})
+
+test_that("build_electron_app does not abort for container strategy with multiple platforms", {
+  tmp <- withr::local_tempdir()
+  out <- file.path(tmp, "out")
+  mockery::stub(build_electron_app, "validate_node_npm", function(...) stop("PAST_GUARD"))
+  expect_error(
+    build_electron_app(tmp, out, app_name = "test", app_type = "r-shiny",
+                       runtime_strategy = "container",
+                       platform = c("mac", "win"), arch = "x64",
+                       verbose = FALSE),
+    "PAST_GUARD"
+  )
+})
+
+test_that("build_electron_app does not abort for shinylive strategy with multiple platforms", {
+  tmp <- withr::local_tempdir()
+  out <- file.path(tmp, "out")
+  mockery::stub(build_electron_app, "validate_node_npm", function(...) stop("PAST_GUARD"))
+  expect_error(
+    build_electron_app(tmp, out, app_name = "test", app_type = "r-shiny",
+                       runtime_strategy = "shinylive",
+                       platform = c("mac", "win"), arch = "x64",
+                       verbose = FALSE),
+    "PAST_GUARD"
+  )
+})
+
+test_that("build_electron_app does not abort for bundled with single platform and arch", {
+  tmp <- withr::local_tempdir()
+  out <- file.path(tmp, "out")
+  mockery::stub(build_electron_app, "validate_node_npm", function(...) stop("PAST_GUARD"))
+  expect_error(
+    build_electron_app(tmp, out, app_name = "test", app_type = "r-shiny",
+                       runtime_strategy = "bundled",
+                       platform = "mac", arch = "arm64",
+                       verbose = FALSE),
+    "PAST_GUARD"
+  )
+})
+
+# --- download_and_extract_portable_tool: abort when executable missing ---
+
+test_that("download_and_extract_portable_tool aborts (not warns) when executable not found", {
+  tmp <- withr::local_tempdir()
+  install_path <- file.path(tmp, "install")
+
+  # Stub network download to write an empty file (the real content is not needed).
+  mockery::stub(
+    download_and_extract_portable_tool, "utils::download.file",
+    function(url, destfile, ...) invisible(file.create(destfile))
+  )
+  # Stub extraction: silently create some content in the staging dir so
+  # fs::file_move(staging, install_path) succeeds normally.
+  mockery::stub(
+    download_and_extract_portable_tool, "utils::untar",
+    function(tarfile, exdir, ...) dir.create(file.path(exdir, "content"))
+  )
+
+  # executable_finder returns NULL -> should abort, not merely warn.
+  expect_error(
+    download_and_extract_portable_tool(
+      label = "TestTool",
+      version = "1.0.0",
+      install_path = install_path,
+      download_url = "https://example.com/tool-1.0.0.tar.gz",
+      executable_finder = function() NULL,
+      verbose = FALSE
+    ),
+    class = "rlang_error"
+  )
+})
