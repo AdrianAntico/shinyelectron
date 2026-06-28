@@ -2,7 +2,7 @@
 
 <!-- README.md is generated from README.qmd. Please edit that file -->
 
-# shinyelectron
+# shinyelectron <a href="https://r-pkg.thecoatlessprofessor.com/shinyelectron/" alt="shinyelectron"><picture><source media="(prefers-color-scheme: dark)" srcset="man/figures/logo-shinyelectron-light-animated.svg"><img src="man/figures/logo-shinyelectron-dark-animated.svg" width="170" align="right" alt="A hexagonal logo for shinyelectron"/></picture></a>
 
 <!-- badges: start -->
 

@@ -13,7 +13,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-# shinyelectron
+# shinyelectron <a href="https://r-pkg.thecoatlessprofessor.com/shinyelectron/" alt="shinyelectron"><picture><source media="(prefers-color-scheme: dark)" srcset="man/figures/logo-shinyelectron-light-animated.svg"><img src="man/figures/logo-shinyelectron-dark-animated.svg" width="170" align="right" alt="A hexagonal logo for shinyelectron"/></picture></a>
 
 <!-- badges: start -->
 [![R-CMD-check](https://github.com/coatless-rpkg/shinyelectron/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/coatless-rpkg/shinyelectron/actions/workflows/R-CMD-check.yaml)
