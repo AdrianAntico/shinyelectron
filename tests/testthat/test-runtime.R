@@ -73,11 +73,15 @@ test_that("r_executable returns NULL when not installed", {
   expect_null(result)
 })
 
-test_that("install_r validates version format", {
-  expect_error(install_r(version = "not-a-version"), "version")
+test_that("install_r_portable validates version format", {
+  expect_error(install_r_portable(version = "not-a-version"), "version")
 })
 
 test_that("generate_runtime_manifest creates valid JSON", {
+  skip_if_not_installed("mockery")
+  # Keep manifest generation offline; the published-checksum lookup is covered
+  # in test-checksum.R.
+  mockery::stub(generate_runtime_manifest, "r_expected_sha256", function(...) NULL)
   manifest <- generate_runtime_manifest("4.4.0", "mac", "arm64")
   parsed <- jsonlite::fromJSON(manifest, simplifyVector = FALSE)
 
@@ -93,6 +97,8 @@ test_that("generate_runtime_manifest uses current platform when NULL", {
   # Uses current platform; on Linux this hits r_download_url() which
   # aborts because portable-r has no Linux builds.
   skip_on_os("linux")
+  skip_if_not_installed("mockery")
+  mockery::stub(generate_runtime_manifest, "r_expected_sha256", function(...) NULL)
   manifest <- generate_runtime_manifest("4.4.0")
   parsed <- jsonlite::fromJSON(manifest, simplifyVector = FALSE)
 
@@ -146,8 +152,8 @@ test_that("python_executable returns NULL when not installed", {
   expect_null(result)
 })
 
-test_that("install_python validates version format", {
-  expect_error(install_python(version = "not-a-version"), "version")
+test_that("install_python_standalone validates version format", {
+  expect_error(install_python_standalone(version = "not-a-version"), "version")
 })
 
 test_that("generate_python_runtime_manifest creates valid JSON", {
@@ -155,6 +161,7 @@ test_that("generate_python_runtime_manifest creates valid JSON", {
   mockery::stub(generate_python_runtime_manifest, "resolve_python_pbs", function(v) {
     list(version = v, release = "20250101")
   })
+  mockery::stub(generate_python_runtime_manifest, "python_expected_sha256", function(...) NULL)
   manifest <- generate_python_runtime_manifest("3.12.0", "mac", "arm64")
   parsed <- jsonlite::fromJSON(manifest, simplifyVector = FALSE)
   expect_equal(parsed$language, "python")
@@ -384,4 +391,77 @@ test_that("download_and_extract_portable_tool aborts (not warns) when executable
     ),
     class = "rlang_error"
   )
+})
+
+# --- build_electron_app: delegates bundled embedding to the shared helpers ---
+
+test_that("build_electron_app delegates bundled R embedding to embed_r_runtime with direct deps", {
+  skip_if_not_installed("mockery")
+  tmp <- withr::local_tempdir()
+  app_dir <- fs::path(tmp, "app"); fs::dir_create(app_dir)
+  writeLines("library(shiny)", fs::path(app_dir, "app.R"))
+  out <- fs::path(tmp, "out")
+
+  # Neutralize the heavyweight build steps.
+  mockery::stub(build_electron_app, "validate_node_npm", function(...) invisible(TRUE))
+  mockery::stub(build_electron_app, "setup_electron_project", function(...) invisible(TRUE))
+  mockery::stub(build_electron_app, "copy_app_files",
+                function(app_dir, output_dir, app_type, ...) {
+    dep_dir <- fs::path(output_dir, "src", "app")
+    fs::dir_create(dep_dir, recurse = TRUE)
+    jsonlite::write_json(
+      list(language = "r",
+           packages = c("shiny", "bslib"),
+           repos = "https://cloud.r-project.org"),
+      fs::path(dep_dir, "dependencies.json"), auto_unbox = TRUE
+    )
+    invisible(TRUE)
+  })
+  mockery::stub(build_electron_app, "process_templates", function(...) invisible(TRUE))
+  mockery::stub(build_electron_app, "install_npm_dependencies", function(...) invisible(TRUE))
+  mockery::stub(build_electron_app, "build_for_platforms", function(...) invisible(TRUE))
+  mockery::stub(build_electron_app, "validate_build_output", function(...) invisible(TRUE))
+  mockery::stub(build_electron_app, "resolve_runtime_version", function(runtime, config) "4.4.1")
+
+  # Neutralize the PRE-refactor inline path so the only behavioral difference is
+  # whether embed_r_runtime is reached (clean red-before-green).
+  mockery::stub(build_electron_app, "install_r_portable", function(...) fs::path(out, "cached-r"))
+  mockery::stub(build_electron_app, "copy_dir_contents", function(src, dst) {
+    fs::dir_create(dst, recurse = TRUE)
+    if (basename(dst) == "R") {
+      fs::dir_create(fs::path(dst, "bin"))
+      writeLines("#!/bin/sh", fs::path(dst, "bin", "Rscript"))
+    }
+    invisible(dst)
+  })
+  mockery::stub(build_electron_app, "r_executable",
+                function(...) fs::path(out, "runtime", "R", "bin", "Rscript"))
+  mockery::stub(build_electron_app, "utils::available.packages",
+                function(repos) matrix(nrow = 0, ncol = 0))
+  mockery::stub(build_electron_app, "tools::package_dependencies",
+                function(packages, db, which, recursive) list())
+  mockery::stub(build_electron_app, "processx::run", function(command, args, ...) {
+    lib <- fs::path(out, "runtime", "R", "library")
+    for (p in c("shiny", "bslib")) fs::dir_create(fs::path(lib, p))
+    list(status = 0, stdout = "", stderr = "")
+  })
+
+  embed_args <- NULL
+  mockery::stub(build_electron_app, "embed_r_runtime",
+                function(output_dir, packages, repos, version, platform, arch, verbose) {
+    embed_args <<- list(packages = packages, repos = repos, version = version,
+                        platform = platform, arch = arch)
+    invisible(fs::path(output_dir, "runtime", "R"))
+  })
+
+  build_electron_app(app_dir, out, app_name = "test", app_type = "r-shiny",
+                     runtime_strategy = "bundled",
+                     platform = "mac", arch = "arm64", verbose = FALSE)
+
+  expect_false(is.null(embed_args))
+  expect_equal(embed_args$packages, c("shiny", "bslib"))
+  expect_equal(embed_args$repos, "https://cloud.r-project.org")
+  expect_equal(embed_args$version, "4.4.1")
+  expect_equal(embed_args$platform, "mac")
+  expect_equal(embed_args$arch, "arm64")
 })

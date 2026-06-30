@@ -2,6 +2,10 @@ url: https://r-pkg.thecoatlessprofessor.com/shinyelectron/
 
 template:
   bootstrap: 5
+  bslib:
+    primary: "#2563eb"
+    base_font: {google: "Inter"}
+    code_font: {google: "JetBrains Mono"}
 
 navbar:
   structure:
@@ -89,8 +93,8 @@ reference:
   - title: "Runtime Management"
     desc: "Install and manage R, Python, and Node.js runtimes"
     contents:
-      - install_r
-      - install_python
+      - install_r_portable
+      - install_python_standalone
       - install_nodejs
 
   - title: "Configuration"

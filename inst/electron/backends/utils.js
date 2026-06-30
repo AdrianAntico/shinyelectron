@@ -1,5 +1,6 @@
 // Shared utilities for backend modules
 const http = require('http');
+const path = require('path');
 
 /**
  * Debug logger gated by the SHINYELECTRON_DEBUG env var.
@@ -218,7 +219,7 @@ function meetsMinimumVersion(version, minimum) {
 // Current manifest schema version. Bump in lockstep with
 // R/constants.R::MANIFEST_SCHEMA_VERSION. Older apps built against an
 // older R version may ship older manifests -- we warn rather than crash.
-const MANIFEST_SCHEMA_VERSION = '1';
+const MANIFEST_SCHEMA_VERSION = '2';
 
 /**
  * Validate a parsed manifest object has the expected schema version.
@@ -239,6 +240,17 @@ function checkManifestSchema(manifest, label) {
   }
 }
 
+/**
+ * Resolve the runtime-manifest.json path for an app, relative to its own app
+ * directory. Works for both single-app (src/app) and multi-app
+ * (src/apps/<id>) layouts because the manifest always sits inside appPath.
+ * @param {string} appPath - Resolved (ASAR-aware) path to the app directory.
+ * @returns {string} Path to that app's runtime-manifest.json.
+ */
+function resolveRuntimeManifestPath(appPath) {
+  return path.join(appPath, 'runtime-manifest.json');
+}
+
 module.exports = {
   waitForServer,
   isPortAvailable,
@@ -251,5 +263,6 @@ module.exports = {
   meetsMinimumVersion,
   MANIFEST_SCHEMA_VERSION,
   checkManifestSchema,
+  resolveRuntimeManifestPath,
   logDebug
 };

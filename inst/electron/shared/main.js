@@ -69,6 +69,22 @@ let isShuttingDown = false;
 let serverRunning = false;
 let actualPort = null;
 let lastSelectedAppId = null;
+let sharedShinyliveServer = null;
+let sharedShinylivePort = null;
+
+// Stop the persistent shinylive server. Called ONLY at quit; the launcher
+// teardown sites deliberately leave it running so the origin (and its
+// root-scoped service worker) survives app-to-app navigation.
+function stopSharedShinyliveServer() {
+  if (sharedShinyliveServer) {
+    try {
+      sharedShinyliveServer.removeAllListeners();
+      sharedShinyliveServer.stop();
+    } catch (e) { /* best-effort */ }
+    sharedShinyliveServer = null;
+    sharedShinylivePort = null;
+  }
+}
 
 // Window state persistence -- remembers size and position between sessions
 const windowStatePath = path.join(app.getPath('userData'), 'window-state.json');
@@ -194,10 +210,13 @@ function createMenu() {
           label: 'Back to Launcher',
           accelerator: 'CmdOrCtrl+L',
           click: () => {
-            if (currentBackend) {
+            // Leave the shared shinylive server running; only tear down a
+            // per-app native/container backend.
+            if (currentBackend && currentBackend !== sharedShinyliveServer) {
               currentBackend.removeAllListeners();
               currentBackend.stop();
             }
+            currentBackend = null;
             if (mainWindow) mainWindow.loadFile('launcher.html');
           }
         }
@@ -312,10 +331,13 @@ function createMenu() {
           label: 'Back to Launcher',
           accelerator: 'CmdOrCtrl+L',
           click: () => {
-            if (currentBackend) {
+            // Leave the shared shinylive server running; only tear down a
+            // per-app native/container backend.
+            if (currentBackend && currentBackend !== sharedShinyliveServer) {
               currentBackend.removeAllListeners();
               currentBackend.stop();
             }
+            currentBackend = null;
             if (mainWindow) mainWindow.loadFile('launcher.html');
           }
         }
@@ -570,21 +592,38 @@ function createWindow() {
   // select_app and retry IPC actions so retry re-attempts the SAME app
   // rather than the single-app defaults.
   function startSelectedApp(appId) {
-    // Stop current backend and purge all listeners (status, error,
-    // install-packages, runtime-selected) to prevent dangling handlers
-    if (currentBackend) {
-      currentBackend.removeAllListeners();
-      currentBackend.stop();
-    }
-
     var selectedApp = appsManifest && appsManifest.apps.find(function(a) { return a.id === appId; });
     if (!selectedApp) return;
 
-    // Load the correct backend for this app, preferring per-app
-    // runtime_strategy when present (mixed-strategy suites).
-    var appStrategy = selectedApp.runtime_strategy || appsManifest.runtime_strategy;
+    // Derive the serve descriptor defensively so an absent/older apps-manifest
+    // (no `serve`) degrades to native dispatch instead of throwing. The per-app
+    // runtime_strategy comes from the serve descriptor when present.
+    var serve = selectedApp.serve || {};
+    var serveKind = serve.kind || (
+      selectedApp.runtime_strategy === 'shinylive' ? 'shinylive' :
+      (selectedApp.runtime_strategy === 'container' ? 'container' : 'native')
+    );
+    var serveStrategy = serve.runtime_strategy || selectedApp.runtime_strategy || appsManifest.runtime_strategy;
+
+    // Stop the OUTGOING per-app backend and purge its listeners, but NEVER the
+    // shared shinylive server -- it is tracked separately (sharedShinyliveServer)
+    // and must outlive launcher round-trips and native-backend starts.
+    if (currentBackend && currentBackend !== sharedShinyliveServer) {
+      currentBackend.removeAllListeners();
+      currentBackend.stop();
+    }
+    currentBackend = null;
+
+    // Shinylive apps share ONE persistent server bound to the site root.
+    if (serveKind === 'shinylive') {
+      startSharedShinyliveApp(selectedApp, serve);
+      return;
+    }
+
+    // Native / container: load this app's own backend, keyed on the resolved
+    // per-app runtime strategy (mixed-strategy suites).
     var appType = selectedApp.type || appsManifest.default_type;
-    currentBackend = getBackendForApp(appType, appStrategy);
+    currentBackend = getBackendForApp(appType, serveStrategy);
 
     // Forward status to lifecycle.html and track running state (so multi-app
     // builds get the same quit-confirmation / shutdown UI as single-app).
@@ -626,8 +665,9 @@ function createWindow() {
     // Show lifecycle page during startup
     mainWindow.loadFile('lifecycle.html');
 
-    // Resolve the app path (ASAR-aware)
-    var selectedAppPath = path.join(__dirname, selectedApp.path);
+    // Resolve the app path (ASAR-aware). Prefer the serve descriptor's
+    // path/site; fall back to the legacy top-level path for older manifests.
+    var selectedAppPath = path.join(__dirname, serve.path || serve.site || selectedApp.path);
     var unpackedAppPath = selectedAppPath.replace('app.asar', 'app.asar.unpacked');
     if (unpackedAppPath !== selectedAppPath && fs.existsSync(unpackedAppPath)) {
       selectedAppPath = unpackedAppPath;
@@ -641,13 +681,70 @@ function createWindow() {
       port: port,
       config: Object.assign({}, {{{backend_config_json}}}, {
         app_type: appType,
-        app_id: selectedApp.id
+        app_id: selectedApp.id,
+        runtime_strategy: serveStrategy
       })
     }).then(function(result) {
       actualPort = result.port;
       mainWindow.loadURL('http://localhost:' + actualPort);
     }).catch(function(err) {
       log('error', 'Backend start failed:', err.message);
+    });
+  }
+
+  // Start (lazily) or reuse the single shared shinylive server. It binds to the
+  // SITE ROOT (src/shinylive-site), so every sub-app is reachable at /<subdir>/
+  // on ONE stable origin. Reuse means launcher round-trips and native-backend
+  // starts never tear it down (the teardown sites skip sharedShinyliveServer).
+  function startSharedShinyliveApp(selectedApp, serve) {
+    var subdir = serve.subdir || selectedApp.id;
+    var navigate = function() {
+      // Trailing slash + 127.0.0.1 (never localhost) keeps one origin and one
+      // root-scoped service worker across sub-app navigations.
+      mainWindow.loadURL('http://127.0.0.1:' + sharedShinylivePort + '/' + subdir + '/');
+    };
+
+    if (sharedShinyliveServer && sharedShinylivePort) {
+      navigate();
+      return;
+    }
+
+    // Resolve the site root (ASAR-aware) and start the persistent server once.
+    var siteRoot = path.join(__dirname, serve.site || 'src/shinylive-site');
+    var unpackedSite = siteRoot.replace('app.asar', 'app.asar.unpacked');
+    if (unpackedSite !== siteRoot && fs.existsSync(unpackedSite)) {
+      siteRoot = unpackedSite;
+    }
+
+    mainWindow.loadFile('lifecycle.html');
+    sharedShinyliveServer = require('./backends/shinylive');
+    sharedShinyliveServer.on('status', function(data) {
+      log('info', '[shinylive] ' + data.phase + ': ' + (data.message || ''));
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('lifecycle-status', data);
+      }
+      if (data.phase === 'server_ready') serverRunning = true;
+    });
+    sharedShinyliveServer.on('error', function(err) {
+      log('error', 'Shinylive server error:', err && err.message ? err.message : err);
+    });
+    sharedShinyliveServer.start({
+      appPath: siteRoot,
+      port: port,
+      config: Object.assign({}, {{{backend_config_json}}}, {
+        app_type: selectedApp.type,
+        app_id: selectedApp.id
+      })
+    }).then(function(result) {
+      sharedShinylivePort = result.port;
+      navigate();
+    }).catch(function(err) {
+      log('error', 'Shinylive server start failed:', err.message);
+      // Reset the singleton so a subsequent selection gets a clean server
+      // with no accumulated duplicate listeners.
+      sharedShinyliveServer.removeAllListeners();
+      sharedShinyliveServer = null;
+      // sharedShinylivePort is already null (start never completed)
     });
   }
 
@@ -690,10 +787,12 @@ function createWindow() {
       startSelectedApp(action.appId);
 
     } else if (actionType === 'back_to_launcher') {
-      if (currentBackend) {
+      // Leave the shared shinylive server running; only stop a per-app backend.
+      if (currentBackend && currentBackend !== sharedShinyliveServer) {
         currentBackend.removeAllListeners();
         currentBackend.stop();
       }
+      currentBackend = null;
       mainWindow.loadFile('launcher.html');
     }
     } catch (err) {
@@ -786,6 +885,11 @@ function createWindow() {
               };
               currentBackend.on('status', onExit);
               currentBackend.stop();
+            } else {
+              // No per-app backend is running (shinylive uses the shared
+              // server, which is stopped in before-quit). Proceed immediately
+              // instead of waiting the full shutdown_timeout.
+              setTimeout(() => app.quit(), 0);
             }
           });
           mainWindow.loadFile('lifecycle.html');
@@ -860,4 +964,6 @@ app.on('before-quit', () => {
 
 app.on('before-quit', () => {
   if (currentBackend) currentBackend.stop();
+  // The shared shinylive server is stopped ONLY here, at quit.
+  stopSharedShinyliveServer();
 });

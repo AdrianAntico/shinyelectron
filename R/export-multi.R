@@ -32,6 +32,10 @@ export_multi_app <- function(appdir, destdir, config,
   # Validate multi-app config
   validate_multi_app_config(config, appdir)
 
+  # Reject conflicting native runtime strategies within a language before
+  # staging (e.g. one bundled and one auto-download R app in the suite).
+  validate_suite_strategies(config$apps, config)
+
   # Create destination
   if (fs::dir_exists(destdir)) {
     if (!overwrite) {
@@ -49,6 +53,10 @@ export_multi_app <- function(appdir, destdir, config,
     # Step 1: Process each app
     apps_dir <- fs::path(destdir, "apps")
     fs::dir_create(apps_dir)
+
+    # Shinylive apps share ONE static site (one WebR/Pyodide asset tree) under
+    # destdir/shinylive-site, each app exported into its own <id> subdir.
+    shinylive_site_dir <- fs::path(destdir, "shinylive-site")
 
     # For Python multi-app suites, read dependencies from the suite root
     # (requirements.txt / pyproject.toml). All apps share one runtime/venv,
@@ -75,6 +83,14 @@ export_multi_app <- function(appdir, destdir, config,
 
     apps_manifest <- list()
 
+    # Accumulate the per-language UNION of DIRECT package sets. embed_*_runtime
+    # resolves the recursive tree internally, so the union of direct sets is the
+    # right input (R: each app's detected deps; Python: the shared suite list).
+    r_union_packages <- character(0)
+    r_union_repos <- NULL
+    py_union_packages <- character(0)
+    py_union_index_urls <- NULL
+
     for (app_entry in config$apps) {
       app_id <- app_entry$id
       app_src <- fs::path(appdir, app_entry$path)
@@ -86,12 +102,14 @@ export_multi_app <- function(appdir, destdir, config,
 
       # Convert or copy based on strategy
       if (this_strategy == "shinylive") {
+        # Additive shared-site export: each app lands at shinylive-site/<id>,
+        # all sharing shinylive-site/shinylive/ (one runtime copy).
         if (this_type == "r-shiny") {
-          convert_shiny_to_shinylive(appdir = app_src, output_dir = app_dest,
-                                     overwrite = TRUE, verbose = verbose)
+          convert_shiny_to_shinylive(appdir = app_src, output_dir = shinylive_site_dir,
+                                     subdir = app_id, verbose = verbose)
         } else {
-          convert_py_to_shinylive(appdir = app_src, output_dir = app_dest,
-                                  overwrite = TRUE, verbose = verbose)
+          convert_py_to_shinylive(appdir = app_src, output_dir = shinylive_site_dir,
+                                  subdir = app_id, verbose = verbose)
         }
       } else {
         copy_dir_contents(app_src, app_dest)
@@ -112,23 +130,56 @@ export_multi_app <- function(appdir, destdir, config,
             index_urls = dep_info$index_urls
           )
           writeLines(manifest, fs::path(app_dest, "dependencies.json"))
+
+          if (this_strategy == "bundled") {
+            if (grepl("^r-", this_type)) {
+              r_union_packages <- c(r_union_packages, unlist(dep_info$packages))
+              if (is.null(r_union_repos)) r_union_repos <- dep_info$repos
+            } else {
+              py_union_packages <- c(py_union_packages, unlist(dep_info$packages))
+              if (is.null(py_union_index_urls)) py_union_index_urls <- dep_info$index_urls
+            }
+          }
         }
       }
 
       # Build manifest entry (use NA for missing icon so jsonlite writes null, not {})
       app_icon <- if (is.null(app_entry$icon) || !nzchar(app_entry$icon %||% "")) NA else app_entry$icon
+      serve <- if (this_strategy == "shinylive") {
+        list(kind = "shinylive", site = "src/shinylive-site", subdir = app_id)
+      } else if (this_strategy == "container") {
+        list(kind = "container", path = paste0("src/apps/", app_id))
+      } else {
+        list(kind = "native", path = paste0("src/apps/", app_id),
+             runtime_strategy = this_strategy)
+      }
       apps_manifest <- c(apps_manifest, list(list(
         id = app_id,
         name = app_entry$name,
         description = app_entry$description %||% "",
-        path = paste0("src/apps/", app_id),
         type = this_type,
         runtime_strategy = this_strategy,
-        icon = app_icon
+        icon = app_icon,
+        serve = serve
       )))
     }
 
     result$apps <- apps_manifest
+
+    # Write the apps manifest into the staging root so it is emitted even when
+    # build = FALSE (tests and tooling can read the serve descriptors without a
+    # full Electron build). build_multi_app persists the same manifest into the
+    # Electron output directory.
+    manifest_data <- list(
+      schema_version = MANIFEST_SCHEMA_VERSION,
+      apps = apps_manifest,
+      default_type = app_type,
+      runtime_strategy = runtime_strategy
+    )
+    writeLines(
+      jsonlite::toJSON(manifest_data, pretty = TRUE, auto_unbox = TRUE),
+      fs::path(destdir, "apps-manifest.json")
+    )
 
     # Step 2: Build Electron application
     if (build) {
@@ -141,6 +192,7 @@ export_multi_app <- function(appdir, destdir, config,
 
       built_app_dir <- build_multi_app(
         apps_dir = apps_dir,
+        shinylive_site_dir = shinylive_site_dir,
         output_dir = electron_dir,
         app_name = app_name,
         apps_manifest = apps_manifest,
@@ -152,7 +204,11 @@ export_multi_app <- function(appdir, destdir, config,
         icon = icon,
         config = config,
         overwrite = TRUE,
-        verbose = verbose
+        verbose = verbose,
+        r_packages = sort(unique(r_union_packages)),
+        r_repos = r_union_repos,
+        py_packages = sort(unique(py_union_packages)),
+        py_index_urls = py_union_index_urls
       )
 
       result$electron_app <- built_app_dir
@@ -208,7 +264,10 @@ export_multi_app <- function(appdir, destdir, config,
 build_multi_app <- function(apps_dir, output_dir, app_name,
                              apps_manifest, default_type,
                              runtime_strategy, sign, platform, arch,
-                             icon, config, overwrite, verbose) {
+                             icon, config, overwrite, verbose,
+                             r_packages = NULL, r_repos = NULL,
+                             py_packages = NULL, py_index_urls = NULL,
+                             shinylive_site_dir = NULL) {
 
   if (is.null(platform)) platform <- detect_current_platform()
   if (is.null(arch)) arch <- detect_current_arch()
@@ -216,13 +275,23 @@ build_multi_app <- function(apps_dir, output_dir, app_name,
   validate_platform(platform)
   validate_arch(arch)
 
+  # Resolve each app's type and runtime strategy once; the single-platform
+  # guard, runtime embedding, and auto-download manifest writing all key off the
+  # per-app resolved strategy rather than the suite-level scalar.
+  app_types <- vapply(config$apps, function(a) resolve_app_type(a, config), character(1))
+  app_strategies <- vapply(config$apps, function(a) resolve_app_strategy(a, config), character(1))
+
   # Bundled / auto-download native runtimes embed a single platform's runtime,
-  # so they cannot target multiple platforms or architectures in one build.
-  if (runtime_strategy %in% c("bundled", "auto-download") &&
-      grepl("^(r|py)-", default_type) &&
-      (length(platform) > 1 || length(arch) > 1)) {
+  # so a suite containing ANY such native app cannot target multiple platforms
+  # or architectures in one build, regardless of the suite-level default.
+  if ((length(platform) > 1 || length(arch) > 1) &&
+      any(app_strategies %in% c("bundled", "auto-download"))) {
+    offending_idx <- which(app_strategies %in% c("bundled", "auto-download"))[1]
+    offending_id <- config$apps[[offending_idx]]$id
+    offending_strategy <- app_strategies[offending_idx]
     cli::cli_abort(c(
-      "The {.val {runtime_strategy}} strategy supports only one platform and architecture per build.",
+      "The {.val {offending_strategy}} strategy supports only one platform and architecture per build.",
+      "i" = "App {.val {offending_id}} embeds a single-platform runtime that would be packaged into every installer.",
       "i" = "Build each target separately, or use the {.val system}, {.val container}, or {.val shinylive} strategy for multi-platform builds."
     ))
   }
@@ -234,13 +303,70 @@ build_multi_app <- function(apps_dir, output_dir, app_name,
   # Setup project structure
   setup_electron_project(output_dir, app_name, default_type, verbose = verbose)
 
-  # Copy all apps to src/apps/
+  # Copy native/container apps to src/apps/. Shinylive apps are NOT staged in
+  # apps_dir (they live in shinylive_site_dir); we additionally skip any
+  # shinylive id defensively so the per-app WASM duplication never reappears.
   src_apps_dir <- fs::path(output_dir, "src", "apps")
   fs::dir_create(src_apps_dir, recurse = TRUE)
 
+  shinylive_ids <- vapply(apps_manifest, function(a) {
+    if (!is.null(a$serve) && identical(a$serve$kind, "shinylive")) a$id else NA_character_
+  }, character(1))
+  shinylive_ids <- shinylive_ids[!is.na(shinylive_ids)]
+
   for (app_id_dir in list.dirs(apps_dir, recursive = FALSE, full.names = TRUE)) {
     app_id <- basename(app_id_dir)
+    if (app_id %in% shinylive_ids) next
     copy_dir_contents(app_id_dir, fs::path(src_apps_dir, app_id))
+  }
+
+  # Copy the shared shinylive site once, preserving the single shinylive/ asset
+  # tree shared by every sub-app.
+  if (!is.null(shinylive_site_dir) && fs::dir_exists(shinylive_site_dir)) {
+    copy_dir_contents(shinylive_site_dir, fs::path(output_dir, "src", "shinylive-site"))
+  }
+
+  # Embed native runtimes once per bundled language. Call unconditionally for a
+  # bundled language even when the union package set is empty: shipping no
+  # runtime/<lang> would break the suite-wide bundled detection in the backends.
+  r_bundled  <- any(grepl("^r-",  app_types) & app_strategies == "bundled")
+  py_bundled <- any(grepl("^py-", app_types) & app_strategies == "bundled")
+
+  if (r_bundled) {
+    if (verbose) cli::cli_alert_info("Embedding R runtime for bundled apps...")
+    embed_r_runtime(
+      output_dir = output_dir,
+      packages = sort(unique(r_packages)),
+      repos = r_repos %||% SHINYELECTRON_DEFAULTS$dependencies$r$repos,
+      version = resolve_runtime_version("r", config),
+      platform = platform[1],
+      arch = arch[1],
+      verbose = verbose
+    )
+  }
+  if (py_bundled) {
+    if (verbose) cli::cli_alert_info("Embedding Python runtime for bundled apps...")
+    embed_python_runtime(
+      output_dir = output_dir,
+      packages = sort(unique(py_packages)),
+      index_urls = py_index_urls %||% SHINYELECTRON_DEFAULTS$dependencies$python$index_urls,
+      version = resolve_runtime_version("python", config),
+      platform = platform[1],
+      arch = arch[1],
+      verbose = verbose
+    )
+  }
+
+  # Auto-download native apps read runtime-manifest.json from their OWN app dir
+  # (src/apps/<id>/runtime-manifest.json), so write one per such app.
+  for (i in seq_along(config$apps)) {
+    if (app_strategies[i] == "auto-download" && grepl("^(r|py)-", app_types[i])) {
+      app_id <- config$apps[[i]]$id
+      write_runtime_manifest(
+        fs::path(src_apps_dir, app_id),
+        app_types[i], platform, arch, config, verbose = verbose
+      )
+    }
   }
 
   # Write apps-manifest.json
@@ -269,5 +395,61 @@ build_multi_app <- function(apps_dir, output_dir, app_name,
   # Build for platforms
   build_for_platforms(output_dir, platform, arch, sign = sign, verbose = verbose)
 
+  # Validate the assembled build output (mirrors the single-app pipeline).
+  validate_build_output(output_dir, platform)
+
   return(fs::path_abs(output_dir))
+}
+
+#' Validate that each language uses a single native runtime strategy
+#'
+#' Native strategies (`system`, `bundled`, `auto-download`) share one backend
+#' module and one suite-wide runtime detection per language, so a suite may
+#' declare at most one distinct native strategy per language. `shinylive` and
+#' `container` apps use their own backends and are exempt.
+#'
+#' @param apps List. `config$apps` entries.
+#' @param config List. Full suite configuration.
+#' @keywords internal
+validate_suite_strategies <- function(apps, config) {
+  native_strategies <- c("system", "bundled", "auto-download")
+  suite_strategy <- config$build$runtime_strategy
+
+  for (lang in c("r", "py")) {
+    lang_pattern <- paste0("^", lang, "-")
+
+    ids <- character(0)
+    strategies <- character(0)
+    for (app in apps) {
+      if (!grepl(lang_pattern, resolve_app_type(app, config))) next
+      strat <- resolve_app_strategy(app, config)
+      if (!strat %in% native_strategies) next
+      ids <- c(ids, app$id)
+      strategies <- c(strategies, strat)
+    }
+
+    if (length(strategies) == 0) next
+
+    distinct <- unique(strategies)
+    if (length(distinct) > 1) {
+      conflict_idx <- which(strategies != strategies[1])[1]
+      cli::cli_abort(c(
+        "Conflicting native runtime strategies for {.field {lang}-shiny} apps.",
+        "x" = "App {.val {ids[1]}} uses {.val {strategies[1]}} but app {.val {ids[conflict_idx]}} uses {.val {strategies[conflict_idx]}}.",
+        "i" = "All native apps of one language must share a single runtime strategy.",
+        "i" = "Use {.val shinylive} or {.val container} for apps that need a different delivery."
+      ), class = "shinyelectron_suite_strategy_conflict")
+    }
+
+    if (!is.null(suite_strategy) && suite_strategy %in% native_strategies &&
+        !identical(suite_strategy, distinct)) {
+      cli::cli_abort(c(
+        "Suite-level {.field build.runtime_strategy} conflicts with a per-app strategy.",
+        "x" = "Suite default is {.val {suite_strategy}} but app {.val {ids[1]}} resolves to {.val {strategies[1]}}.",
+        "i" = "Set {.field build.runtime_strategy} to {.val {strategies[1]}} or remove the per-app override."
+      ), class = "shinyelectron_suite_strategy_conflict")
+    }
+  }
+
+  invisible(TRUE)
 }
