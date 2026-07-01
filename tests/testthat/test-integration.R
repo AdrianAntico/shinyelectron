@@ -213,7 +213,7 @@ test_that("e2e: signed build includes identity and notarize in package.json", {
   r <- generate_package_json("test-app", "1.0.0", "shinylive", cfg, sign = TRUE)
   p <- jsonlite::fromJSON(r, simplifyVector = FALSE)
   expect_equal(p$build$mac$identity, "Developer ID Application: Test")
-  expect_equal(p$build$mac$notarize$teamId, "TEAM123")
+  expect_true(p$build$mac$notarize)
 })
 
 # --- Template Assembly ---

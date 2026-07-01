@@ -47,7 +47,7 @@ test_that("generate_package_json includes signing identity when sign is TRUE", {
   )
   parsed <- jsonlite::fromJSON(result, simplifyVector = FALSE)
   expect_equal(parsed$build$mac$identity, "Developer ID Application: Test (TEAMID)")
-  expect_equal(parsed$build$mac$notarize$teamId, "TEAMID")
+  expect_true(parsed$build$mac$notarize)
 })
 
 test_that("generate_package_json notarizes from env credentials when sign is TRUE", {
@@ -61,8 +61,9 @@ test_that("generate_package_json notarizes from env credentials when sign is TRU
       list(signing = list(sign = TRUE)), sign = TRUE),
     simplifyVector = FALSE
   )
-  # Team id and notarization come from the environment, no config file needed.
-  expect_equal(parsed$build$mac$notarize$teamId, "ENVTEAM123")
+  # Notarization is enabled from the environment; the team id and credentials
+  # are read from the APPLE_* env vars by electron-builder at build time.
+  expect_true(parsed$build$mac$notarize)
 })
 
 test_that("generate_package_json skips notarization without credentials", {

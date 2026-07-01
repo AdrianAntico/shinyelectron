@@ -131,11 +131,13 @@ generate_package_json <- function(app_slug, app_version, backend, config,
     }
     # Notarize when explicitly requested via config, or when notarization
     # credentials are present in the environment (the standard CI case).
+    # electron-builder 26+ takes `notarize` as a boolean and reads the team id
+    # and credentials from APPLE_TEAM_ID / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD.
     have_notarize_creds <- nzchar(Sys.getenv("APPLE_ID")) &&
       nzchar(Sys.getenv("APPLE_APP_SPECIFIC_PASSWORD"))
     if ((isTRUE(signing$mac$notarize) || have_notarize_creds) &&
         !is.null(team_id)) {
-      mac_config$notarize <- list(teamId = team_id)
+      mac_config$notarize <- TRUE
     }
 
     # Windows signing
