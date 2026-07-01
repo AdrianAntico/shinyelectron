@@ -15,28 +15,105 @@ knitr:
 library(shinyelectron)
 ```
 
-Every demo is built with every runtime strategy on every supported platform and published as a release asset. Pick a row, check what it needs, and download.
+Every demo is built with every runtime strategy on each supported platform and published as a release asset. The only gap is the `bundled` and `auto-download` strategies for R on Linux, which have no portable runtime; those cells show `--`.
 
-What each strategy needs on the user's machine:
+Each download is a desktop installer: run it to install the app, then launch the demo. On Linux the download is a portable AppImage you can run directly, with no install step. What changes between strategies is what the app needs once it launches:
 
-- `shinylive`: nothing. The app runs in WebAssembly.
-- `bundled`: nothing. A runtime is embedded in the installer.
+- `shinylive`: no runtime at all. The app runs in WebAssembly, offline.
+- `bundled`: no runtime to install. A copy of R or Python is embedded in the app.
 - `system`: R or Python already installed and on the PATH.
-- `auto-download`: internet access on first launch to fetch the runtime.
+- `auto-download`: internet access on first launch to download the runtime, then cached.
 - `container`: Docker or Podman installed.
+
+Your platform's downloads are shown first. Use **More downloads** for every other platform.
 
 ```{r}
 #| echo: false
 #| results: asis
 m <- shinyelectron:::demo_release_matrix()
 base <- "https://github.com/coatless-rpkg/shinyelectron/releases/latest/download/"
-cat("| Demo | Strategy | Platform | Requirement | Download |\n")
-cat("|------|----------|----------|-------------|----------|\n")
-for (i in seq_len(nrow(m))) {
-  cat(sprintf("| %s | `%s` | %s %s | %s | [%s](%s%s) |\n",
-    m$name[i], m$strategy[i], m$platform[i], m$arch[i],
-    m$requirement[i], m$asset_name[i], base, m$asset_name[i]))
+
+platforms <- list(
+  list(id = "mac-arm64", label = "macOS (Apple Silicon)", platform = "mac", arch = "arm64"),
+  list(id = "mac-x64",   label = "macOS (Intel)",         platform = "mac", arch = "x64"),
+  list(id = "win-x64",   label = "Windows",               platform = "win", arch = "x64"),
+  list(id = "linux-x64", label = "Linux",                 platform = "linux", arch = "x64")
+)
+languages <- list(list(name = "Python", lang = "py"), list(name = "R", lang = "r"))
+groups <- list(
+  list(title = "Standalone (no R or Python needed)", strategies = c("shinylive", "bundled")),
+  list(title = "Needs a runtime or tooling", strategies = c("system", "auto-download", "container"))
+)
+
+dl <- function(rows, demo, strat) {
+  r <- rows[rows$demo == demo & rows$strategy == strat, ]
+  if (nrow(r) == 0) return("--")
+  sprintf("[download](%s%s)", base, r$asset_name)
+}
+
+for (p in platforms) {
+  cat(sprintf("\n::: {.platform-block data-platform=\"%s\" data-label=\"%s\"}\n", p$id, p$label))
+  pm <- m[m$platform == p$platform & m$arch == p$arch, ]
+  for (lg in languages) {
+    cat(sprintf("\n## %s\n", lg$name))
+    lm <- pm[pm$language == lg$lang, ]
+    demos <- unique(lm[, c("demo", "name")])
+    for (g in groups) {
+      strs <- g$strategies
+      cat(sprintf("\n### %s\n\n", g$title))
+      cat(paste0("| Demo | ", paste(sprintf("`%s`", strs), collapse = " | "), " |\n"))
+      cat(paste0("|", paste(rep("---", length(strs) + 1), collapse = "|"), "|\n"))
+      for (i in seq_len(nrow(demos))) {
+        cells <- vapply(strs, function(s) dl(lm, demos$demo[i], s), character(1))
+        cat(sprintf("| %s | %s |\n", demos$name[i], paste(cells, collapse = " | ")))
+      }
+    }
+  }
+  cat("\n:::\n")
 }
 ```
 
-All links point at the latest release, so they stay current as new versions are published.
+```{=html}
+<style>
+.detected-platform { margin: 1rem 0 0.25rem; }
+details.more-downloads { margin-top: 1.5rem; }
+details.more-downloads > summary { cursor: pointer; font-weight: 600; }
+</style>
+<script>
+(function () {
+  function detectTarget() {
+    var ua = navigator.userAgent || "";
+    var uaData = navigator.userAgentData;
+    var platStr = ((uaData && uaData.platform) || navigator.platform || "") + " " + ua;
+    var os = /mac/i.test(platStr) ? "mac" : /win/i.test(platStr) ? "win" : /linux|x11/i.test(platStr) ? "linux" : null;
+    if (!os) return Promise.resolve(null);
+    if (os !== "mac") return Promise.resolve(os + "-x64");
+    if (uaData && uaData.getHighEntropyValues) {
+      return uaData.getHighEntropyValues(["architecture"]).then(function (h) {
+        return "mac-" + (h.architecture === "arm" ? "arm64" : "x64");
+      }).catch(function () { return "mac-arm64"; });
+    }
+    return Promise.resolve("mac-arm64");
+  }
+  function organize(targetId) {
+    var blocks = Array.prototype.slice.call(document.querySelectorAll(".platform-block"));
+    if (!blocks.length) return;
+    var target = targetId && document.querySelector('.platform-block[data-platform="' + targetId + '"]');
+    if (!target) return; // detection failed: leave every block visible
+    var label = target.getAttribute("data-label") || targetId;
+    var heading = document.createElement("p");
+    heading.className = "detected-platform";
+    heading.innerHTML = "Showing downloads for: <strong>" + label + "</strong>";
+    target.parentNode.insertBefore(heading, target);
+    var details = document.createElement("details");
+    details.className = "more-downloads";
+    var summary = document.createElement("summary");
+    summary.textContent = "More downloads (other platforms)";
+    details.appendChild(summary);
+    blocks.forEach(function (b) { if (b !== target) details.appendChild(b); });
+    target.parentNode.insertBefore(details, target.nextSibling);
+  }
+  document.addEventListener("DOMContentLoaded", function () { detectTarget().then(organize); });
+})();
+</script>
+```
