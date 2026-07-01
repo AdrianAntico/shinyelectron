@@ -36,7 +36,7 @@ print_demo_file <- function(rel_path, lang = "") {
 
 One repo, many apps, one launcher. A suite bundles several Shiny apps, R or Python, into a single Electron binary. Users open the launcher, pick an app, and switch whenever they like through the **Apps** menu.
 
-![The launcher hands off to one backend at a time; picking a different app returns through the launcher.](../man/figures/multi-app-routing.svg){fig-alt="A launcher panel on the left with three app cards. An arrow labelled 'pick an app' leads to an active backend window on the right. A return arrow labelled 'Apps menu: Back' leads from the backend back to the launcher. On the far right, the apps manifest lists dashboard, data-explorer, and about."}
+<figure><picture><source srcset="../man/figures/multi-app-routing-dark.svg" media="(prefers-color-scheme: dark)" /><img src="../man/figures/multi-app-routing.svg" alt="A launcher panel on the left with three app cards. An arrow labelled 'pick an app' leads to an active backend window on the right. A return arrow labelled 'Apps menu: Back' leads from the backend back to the launcher. On the far right, the apps manifest lists dashboard, data-explorer, and about." /></picture><figcaption>The launcher hands off to one backend at a time; picking a different app returns through the launcher.</figcaption></figure>
 
 ## Layout
 

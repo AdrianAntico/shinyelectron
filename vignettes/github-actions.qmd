@@ -44,7 +44,7 @@ show_template_yaml <- function(anchor_re, max_lines = 200) {
 
 A desktop installer has to be built on the OS it targets: a `.dmg` on macOS, an `.exe` on Windows, and an `.AppImage` on Linux. That is four builds for full coverage, and most teams do not have all four machines on a desk. GitHub Actions rents them by the minute, runs them in parallel, and hands back the installers as artifacts. One push, four builds, no hardware juggling.
 
-![The build matrix: one push fans out across platform runners, each producing an installer; a tag push adds a release job that attaches them all.](../man/figures/ci-build-matrix.svg){fig-alt="A git push node on the left fans out to four runner rows (macos-latest, macos-15-intel, windows-latest, ubuntu-latest), each producing a platform-specific installer, which fan back in to a Release job on the right that runs only on tag pushes."}
+<figure><picture><source srcset="../man/figures/ci-build-matrix-dark.svg" media="(prefers-color-scheme: dark)" /><img src="../man/figures/ci-build-matrix.svg" alt="A git push node on the left fans out to four runner rows (macos-latest, macos-15-intel, windows-latest, ubuntu-latest), each producing a platform-specific installer, which fan back in to a Release job on the right that runs only on tag pushes." /></picture><figcaption>The build matrix: one push fans out across platform runners, each producing an installer; a tag push adds a release job that attaches them all.</figcaption></figure>
 
 ## Why automate
 

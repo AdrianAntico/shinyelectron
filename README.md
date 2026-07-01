@@ -16,7 +16,7 @@ that runs on macOS, Windows, and Linux. No web server, no browser tab,
 no deployment infrastructure. Just an `.app`, `.exe`, or AppImage your
 users double-click to open.
 
-![](man/figures/pipeline-overview.svg)
+<picture><source srcset="man/figures/pipeline-overview-dark.svg" media="(prefers-color-scheme: dark)" /><img src="man/figures/pipeline-overview.svg" alt="pipeline overview" /></picture>
 
 > [!IMPORTANT]
 >

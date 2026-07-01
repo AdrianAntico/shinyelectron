@@ -85,7 +85,7 @@ Whenever shinyelectron needs to run `node` or `npm`, it picks one in this order:
 2. **The system Node.js** found on `PATH`.
 3. If neither is available, the call fails with a message naming both options.
 
-![Node.js resolution: local cache first, then system PATH, then error.](../man/figures/nodejs-resolution.svg){fig-alt="Flow diagram showing export() checking the local shinyelectron cache first, falling back to the system PATH, and erroring if neither Node.js install is available."}
+<figure><picture><source srcset="../man/figures/nodejs-resolution-dark.svg" media="(prefers-color-scheme: dark)" /><img src="../man/figures/nodejs-resolution.svg" alt="Flow diagram showing export() checking the local shinyelectron cache first, falling back to the system PATH, and erroring if neither Node.js install is available." /></picture><figcaption>Node.js resolution: local cache first, then system PATH, then error.</figcaption></figure>
 
 `sitrep_electron_system()` shows what it finds:
 
