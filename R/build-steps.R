@@ -57,11 +57,15 @@ dist_has_platform_artifact <- function(output_dir, p) {
   dist_dir <- fs::path(output_dir, "dist")
   if (!fs::dir_exists(dist_dir)) return(FALSE)
 
-  # Platform-specific installer extensions
+  # Match only finished installer files, never electron-builder's intermediate
+  # output directories (mac-arm64/, win-unpacked/, ...). Those dirs hold the
+  # unpacked .app/.exe and exist even when the installer step (signing,
+  # notarization, dmg packaging) failed -- treating them as success masks the
+  # real failure and leaves the collect step with no installer to publish.
   patterns <- switch(p,
-    mac = c("\\.dmg$", "\\.zip$", "^mac(-arm64|-x64)?$"),
-    win = c("\\.exe$", "\\.msi$", "^win(-arm64|-x64|-unpacked)?$"),
-    linux = c("\\.AppImage$", "\\.deb$", "\\.rpm$", "\\.snap$", "^linux(-arm64|-x64|-unpacked)?$"),
+    mac = c("\\.dmg$", "\\.pkg$", "\\.zip$"),
+    win = c("\\.exe$", "\\.msi$"),
+    linux = c("\\.AppImage$", "\\.deb$", "\\.rpm$", "\\.snap$"),
     character(0)
   )
   if (length(patterns) == 0) return(FALSE)

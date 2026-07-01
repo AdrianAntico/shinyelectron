@@ -1,0 +1,52 @@
+# Temporary single-job diagnostic for macOS signing/notarization.
+#
+# Builds ONE mac-arm64 demo with signing on, using the shinyelectron code on
+# `main` (which surfaces electron-builder's real error instead of masking it).
+# Uploads nothing and touches no release -- it exists only to print the actual
+# sign/notarize failure in one job instead of rerunning all 76. Delete once
+# signing works.
+
+name: sign-diag
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    name: signed mac-arm64 demo (diagnostic)
+    runs-on: macos-latest
+    env:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build one signed mac demo
+        uses: coatless-actions/shiny-to-electron@v1
+        with:
+          appdir: inst/demos/demo-single
+          app-name: demo-single
+          app-type: r-shiny
+          runtime-strategy: shinylive
+          platform: mac
+          arch: arm64
+          sign: 'true'
+          shinyelectron-source: github::coatless-rpkg/shinyelectron@main
+          upload-artifact: 'false'
+
+      - name: Show what landed in dist
+        if: always()
+        run: |
+          echo "=== dist directories ==="
+          find "$GITHUB_WORKSPACE" -type d -name dist 2>/dev/null | while read -r d; do
+            echo "-- $d"
+            ls -la "$d" || true
+          done
+          echo "=== installers / apps found ==="
+          find "$GITHUB_WORKSPACE" \( -name '*.dmg' -o -name '*.zip' -o -name '*.app' \) 2>/dev/null | head -20
