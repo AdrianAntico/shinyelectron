@@ -29,9 +29,9 @@ multi-app suites.
   `APPLE_*` environment variables.
 * `enable_auto_updates()`, `disable_auto_updates()`, and
   `check_auto_update_status()` manage electron-updater configuration.
-* `install_r()`, `install_python()`, and `install_nodejs()` download and cache
-  portable runtimes, and `cache_dir()`, `cache_info()`, and `cache_remove()`
-  inspect and prune the cache.
+* `install_r_portable()`, `install_python_standalone()`, and `install_nodejs()`
+  download and cache portable runtimes, and `cache_dir()`, `cache_info()`, and
+  `cache_remove()` inspect and prune the cache.
 * `dependencies.r.version`, `dependencies.python.version`, and
   `dependencies.electron.version` pin the versions a build uses; each accepts
   `null`, `"latest"`, or an exact version.
