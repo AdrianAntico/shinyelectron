@@ -11,7 +11,7 @@ template:
 navbar:
   structure:
     left: [intro, articles, reference, news]
-    right: [search, github]
+    right: [search, github, lightswitch]
   components:
     intro:
       text: Get Started
