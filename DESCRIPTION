@@ -17,23 +17,23 @@ URL: https://r-pkg.thecoatlessprofessor.com/shinyelectron/, https://github.com/c
 BugReports: https://github.com/coatless-rpkg/shinyelectron/issues
 Depends: R (>= 4.4.0)
 Imports:
-    cli (>= 3.6.5),
-    fs (>= 1.6.6),
+    cli (>= 3.6.6),
+    fs (>= 2.1.0),
     jsonlite (>= 2.0.0),
-    rappdirs (>= 0.3.3),
+    rappdirs (>= 0.3.4),
     whisker (>= 0.4.1),
-    processx (>= 3.8.6),
+    processx (>= 3.9.0),
     stats,
     tools,
     utils,
-    yaml (>= 2.3.0)
+    yaml (>= 2.3.12)
 Suggests:
-    testthat (>= 3.0.0),
-    mockery,
-    quarto,
-    renv (>= 1.0.0),
-    shinylive (>= 0.3.0),
-    withr
+    testthat (>= 3.3.2),
+    mockery (>= 0.4.5),
+    quarto (>= 1.5.1),
+    renv (>= 1.2.3),
+    shinylive (>= 0.5.0),
+    withr (>= 3.0.3)
 VignetteBuilder: quarto
 SystemRequirements: Node.js (>= 22.0.0), npm (>= 11.5.0)
 Encoding: UTF-8
