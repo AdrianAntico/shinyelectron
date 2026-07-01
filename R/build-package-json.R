@@ -131,10 +131,14 @@ generate_package_json <- function(app_slug, app_version, backend, config,
       win_config$certificateFile <- signing$win$certificate_file
       win_config$signingHashAlgorithms <- list("sha256")
     }
+  } else {
+    # Without Developer ID signing, still ad-hoc sign the macOS bundle so it
+    # carries a valid signature. Apple Silicon rejects an unsealed bundle as
+    # "damaged"; an ad-hoc signature ("-") lets the app launch through the
+    # standard unidentified-developer prompt, with no certificate or
+    # notarization. Windows and Linux stay unsigned.
+    mac_config$identity <- "-"
   }
-  # When sign is FALSE, signing is disabled at build time via the
-  # CSC_IDENTITY_AUTO_DISCOVERY=false environment variable set in
-  # build_for_platforms(); no package.json identity field is needed.
 
   if (!is.null(config$installer$license_file)) {
     win_config$license <- config$installer$license_file

@@ -25,6 +25,8 @@ Each download is a desktop installer: run it to install the app, then launch the
 - `auto-download`: internet access on first launch to download the runtime, then cached.
 - `container`: Docker or Podman installed.
 
+On macOS these demo apps are ad-hoc signed but not notarized, so the first launch shows a warning that the developer cannot be verified. Right-click (or Control-click) the app, choose Open, and confirm. See the [Code Signing](code-signing.html) article for notarizing your own builds.
+
 Your platform's downloads are shown first. Use **More downloads** for every other platform.
 
 ```{r}
