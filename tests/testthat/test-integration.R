@@ -201,10 +201,10 @@ test_that("e2e: autodetect from app.py defaults to py-shiny + shinylive", {
 
 # --- Signing ---
 
-test_that("e2e: unsigned build sets identity null in package.json", {
+test_that("e2e: unsigned build ad-hoc signs macOS in package.json", {
   r <- generate_package_json("test-app", "1.0.0", "shinylive", list(), sign = FALSE)
   p <- jsonlite::fromJSON(r, simplifyVector = FALSE)
-  expect_null(p$build$mac$identity)
+  expect_equal(p$build$mac$identity, "-")
 })
 
 test_that("e2e: signed build includes identity and notarize in package.json", {

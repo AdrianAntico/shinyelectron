@@ -16,7 +16,7 @@ test_that("default_config includes signing section", {
   expect_false(cfg$signing$sign)
 })
 
-test_that("generate_package_json sets identity null when sign is FALSE", {
+test_that("generate_package_json ad-hoc signs macOS when sign is FALSE", {
   result <- generate_package_json(
     app_slug = "my-app",
     app_version = "1.0.0",
@@ -25,7 +25,9 @@ test_that("generate_package_json sets identity null when sign is FALSE", {
     sign = FALSE
   )
   parsed <- jsonlite::fromJSON(result, simplifyVector = FALSE)
-  expect_null(parsed$build$mac$identity)
+  # Ad-hoc identity ("-") so Apple Silicon accepts the bundle instead of
+  # rejecting an unsealed one as damaged.
+  expect_equal(parsed$build$mac$identity, "-")
 })
 
 test_that("generate_package_json includes signing identity when sign is TRUE", {
