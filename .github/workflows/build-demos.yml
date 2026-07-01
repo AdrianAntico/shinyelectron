@@ -47,6 +47,15 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.setup.outputs.matrix) }}
     name: ${{ matrix.demo }} / ${{ matrix.strategy }} / ${{ matrix.platform }}-${{ matrix.arch }}
+    # macOS Developer ID signing and notarization credentials, forwarded to the
+    # build so electron-builder can sign and notarize. Empty on non-mac jobs and
+    # until the repository secrets are added, in which case mac stays ad-hoc.
+    env:
+      CSC_LINK: ${{ matrix.platform == 'mac' && secrets.CSC_LINK || '' }}
+      CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.CSC_KEY_PASSWORD || '' }}
+      APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -70,6 +79,8 @@ jobs:
           runtime-strategy: ${{ matrix.strategy }}
           shinyelectron-source: ${{ steps.src.outputs.source }}
           upload-artifact: 'false'
+          # Sign and notarize macOS builds only once the signing secret exists.
+          sign: ${{ (matrix.platform == 'mac' && secrets.CSC_LINK != '') && 'true' || 'false' }}
 
       - name: Collect the installer
         id: collect
