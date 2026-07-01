@@ -158,7 +158,15 @@ build_for_platforms <- function(output_dir, platform, arch, sign = FALSE, verbos
           if (verbose) cli::cli_alert_success("Built for {target}")
           next
         } else {
-          if (verbose) cli::cli_alert_warning("Specific script {build_script} failed: {result$stderr}")
+          if (verbose) {
+            cli::cli_alert_warning("Specific script {build_script} failed (exit {result$status})")
+            build_out <- trimws(paste(result$stdout, result$stderr, sep = "\n"))
+            if (nzchar(build_out)) {
+              cli::cli_verbatim(utils::tail(
+                strsplit(build_out, "\n", fixed = TRUE)[[1]], 30
+              ))
+            }
+          }
         }
       } else {
         if (verbose) cli::cli_alert_info("Script {build_script} not found, trying platform-only build")
@@ -201,7 +209,13 @@ build_for_platforms <- function(output_dir, platform, arch, sign = FALSE, verbos
         } else if (dist_has_platform_artifact(output_dir, p)) {
           cli::cli_alert_success("Built for {p} (fallback - may include multiple architectures)")
         } else {
-          cli::cli_alert_warning("Fallback build also failed for {p}: {fallback_result$stderr}")
+          cli::cli_alert_warning("Fallback build also failed for {p} (exit {fallback_result$status})")
+          fb_out <- trimws(paste(fallback_result$stdout, fallback_result$stderr, sep = "\n"))
+          if (nzchar(fb_out)) {
+            cli::cli_verbatim(utils::tail(
+              strsplit(fb_out, "\n", fixed = TRUE)[[1]], 30
+            ))
+          }
         }
       } else {
         cli::cli_alert_warning("No build script found for platform {p}")
