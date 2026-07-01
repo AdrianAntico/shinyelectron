@@ -122,8 +122,20 @@ generate_package_json <- function(app_slug, app_version, backend, config,
     if (!is.null(signing$mac$identity)) {
       mac_config$identity <- signing$mac$identity
     }
-    if (isTRUE(signing$mac$notarize) && !is.null(signing$mac$team_id)) {
-      mac_config$notarize <- list(teamId = signing$mac$team_id)
+    # Resolve the notarization team id from config, falling back to the
+    # APPLE_TEAM_ID environment variable used in CI.
+    team_id <- signing$mac$team_id
+    if (is.null(team_id)) {
+      env_team_id <- Sys.getenv("APPLE_TEAM_ID")
+      if (nzchar(env_team_id)) team_id <- env_team_id
+    }
+    # Notarize when explicitly requested via config, or when notarization
+    # credentials are present in the environment (the standard CI case).
+    have_notarize_creds <- nzchar(Sys.getenv("APPLE_ID")) &&
+      nzchar(Sys.getenv("APPLE_APP_SPECIFIC_PASSWORD"))
+    if ((isTRUE(signing$mac$notarize) || have_notarize_creds) &&
+        !is.null(team_id)) {
+      mac_config$notarize <- list(teamId = team_id)
     }
 
     # Windows signing

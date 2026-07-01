@@ -50,6 +50,33 @@ test_that("generate_package_json includes signing identity when sign is TRUE", {
   expect_equal(parsed$build$mac$notarize$teamId, "TEAMID")
 })
 
+test_that("generate_package_json notarizes from env credentials when sign is TRUE", {
+  withr::local_envvar(
+    APPLE_ID = "dev@example.com",
+    APPLE_APP_SPECIFIC_PASSWORD = "abcd-efgh-ijkl-mnop",
+    APPLE_TEAM_ID = "ENVTEAM123"
+  )
+  parsed <- jsonlite::fromJSON(
+    generate_package_json("my-app", "1.0.0", "shinylive",
+      list(signing = list(sign = TRUE)), sign = TRUE),
+    simplifyVector = FALSE
+  )
+  # Team id and notarization come from the environment, no config file needed.
+  expect_equal(parsed$build$mac$notarize$teamId, "ENVTEAM123")
+})
+
+test_that("generate_package_json skips notarization without credentials", {
+  withr::local_envvar(
+    APPLE_ID = "", APPLE_APP_SPECIFIC_PASSWORD = "", APPLE_TEAM_ID = ""
+  )
+  parsed <- jsonlite::fromJSON(
+    generate_package_json("my-app", "1.0.0", "shinylive",
+      list(signing = list(sign = TRUE)), sign = TRUE),
+    simplifyVector = FALSE
+  )
+  expect_null(parsed$build$mac$notarize)
+})
+
 test_that("generate_package_json includes Windows cert when sign is TRUE", {
   result <- generate_package_json(
     app_slug = "my-app",
