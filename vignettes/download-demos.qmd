@@ -25,7 +25,7 @@ Each download is a desktop installer: run it to install the app, then launch the
 - `auto-download`: internet access on first launch to download the runtime, then cached.
 - `container`: Docker or Podman installed.
 
-On macOS these demo apps are ad-hoc signed but not notarized, so the first launch shows a warning that the developer cannot be verified. Right-click (or Control-click) the app, choose Open, and confirm. See the [Code Signing](code-signing.html) article for notarizing your own builds.
+On macOS these demos are signed with a Developer ID certificate and notarized by Apple, so they launch without a warning. Windows demos are unsigned, so the first launch shows a SmartScreen prompt; choose **More info**, then **Run anyway**. When you build your own apps for distribution, sign and notarize them so users never see these prompts. The [Code Signing](code-signing.html) article covers the setup.
 
 Your platform's downloads are shown first. Use **More downloads** for every other platform.
 
