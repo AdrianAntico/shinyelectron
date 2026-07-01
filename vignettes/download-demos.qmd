@@ -53,14 +53,15 @@ dl <- function(rows, demo, strat) {
 
 for (p in platforms) {
   cat(sprintf("\n::: {.platform-block data-platform=\"%s\" data-label=\"%s\"}\n", p$id, p$label))
+  cat(sprintf("\n## %s\n", p$label))
   pm <- m[m$platform == p$platform & m$arch == p$arch, ]
   for (lg in languages) {
-    cat(sprintf("\n## %s\n", lg$name))
+    cat(sprintf("\n### %s\n", lg$name))
     lm <- pm[pm$language == lg$lang, ]
     demos <- unique(lm[, c("demo", "name")])
     for (g in groups) {
       strs <- g$strategies
-      cat(sprintf("\n### %s\n\n", g$title))
+      cat(sprintf("\n#### %s\n\n", g$title))
       cat(paste0("| Demo | ", paste(sprintf("`%s`", strs), collapse = " | "), " |\n"))
       cat(paste0("|", paste(rep("---", length(strs) + 1), collapse = "|"), "|\n"))
       for (i in seq_len(nrow(demos))) {
@@ -75,7 +76,16 @@ for (p in platforms) {
 
 ```{=html}
 <style>
-.detected-platform { margin: 1rem 0 0.25rem; }
+.platform-block > h2 .your-platform {
+  font-size: 0.6em;
+  font-weight: 400;
+  vertical-align: middle;
+  margin-left: 0.5rem;
+  padding: 0.05em 0.5em;
+  border: 1px solid currentColor;
+  border-radius: 1em;
+  opacity: 0.7;
+}
 details.more-downloads { margin-top: 1.5rem; }
 details.more-downloads > summary { cursor: pointer; font-weight: 600; }
 </style>
@@ -99,16 +109,19 @@ details.more-downloads > summary { cursor: pointer; font-weight: 600; }
     var blocks = Array.prototype.slice.call(document.querySelectorAll(".platform-block"));
     if (!blocks.length) return;
     var target = targetId && document.querySelector('.platform-block[data-platform="' + targetId + '"]');
-    if (!target) return; // detection failed: leave every block visible
-    var label = target.getAttribute("data-label") || targetId;
-    var heading = document.createElement("p");
-    heading.className = "detected-platform";
-    heading.innerHTML = "Showing downloads for: <strong>" + label + "</strong>";
-    target.parentNode.insertBefore(heading, target);
+    if (!target) return; // detection failed: leave every platform visible under its own heading
+    var h = target.querySelector("h2");
+    if (h) {
+      var badge = document.createElement("span");
+      badge.className = "your-platform";
+      badge.textContent = "your platform";
+      h.appendChild(document.createTextNode(" "));
+      h.appendChild(badge);
+    }
     var details = document.createElement("details");
     details.className = "more-downloads";
     var summary = document.createElement("summary");
-    summary.textContent = "More downloads (other platforms)";
+    summary.textContent = "More downloads for other platforms";
     details.appendChild(summary);
     blocks.forEach(function (b) { if (b !== target) details.appendChild(b); });
     target.parentNode.insertBefore(details, target.nextSibling);
