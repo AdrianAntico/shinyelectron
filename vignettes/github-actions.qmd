@@ -264,6 +264,15 @@ jobs:
             any::shinylive
           needs: build
 
+      - name: Install the app's R dependencies
+        shell: Rscript {0}
+        run: |
+          # shinylive compiles the WebAssembly bundle from installed packages,
+          # so the packages your app uses must be present before building.
+          pkgs <- shinyelectron::app_dependencies("app", app_type = "r-shiny")
+          pkgs <- setdiff(pkgs, rownames(installed.packages()))
+          if (length(pkgs)) install.packages(pkgs)
+
       - name: Build the Electron app
         shell: Rscript {0}
         run: |
@@ -305,6 +314,10 @@ Hosted Ubuntu runners are minimal. If your R or Python dependencies need system 
     sudo apt-get update
     sudo apt-get install -y libcurl4-openssl-dev libxml2-dev
 ```
+
+### shinylive build stops with "there is no package called ..."
+
+`shinylive::export()` compiles the WebAssembly bundle from the packages installed on the runner, so a shinylive R app whose packages are not installed stops with, for example, `there is no package called 'bsicons'`. The action installs an app's detected packages for you. In a hand-rolled workflow, add the step from the roll-your-own recipe above (`shinyelectron::app_dependencies()` then `install.packages()`). If detection misses a package your code loads dynamically, add it to that `install.packages()` call yourself.
 
 ### Pin the shinyelectron version
 
