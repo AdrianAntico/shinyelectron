@@ -727,7 +727,7 @@ read_brand_yml <- function(appdir) {
   brand_file <- file.path(appdir, "_brand.yml")
   if (!file.exists(brand_file)) return(NULL)
   tryCatch(
-    yaml::read_yaml(brand_file),
+    resolve_brand_palette(yaml::read_yaml(brand_file)),
     error = function(e) {
       cli::cli_warn(c(
         "Failed to parse {.file {brand_file}}",
@@ -738,4 +738,27 @@ read_brand_yml <- function(appdir) {
       NULL
     }
   )
+}
+
+#' Resolve Posit brand.yml palette references
+#'
+#' In a brand.yml `color` block the semantic roles (`primary`, `background`,
+#' `foreground`, ...) may either hold a colour directly or name an entry in
+#' `color.palette`. shinyelectron reads these roles verbatim for the Electron
+#' shell, so a reference such as `primary: plum` must be resolved to its palette
+#' value before use. Roles that already hold a literal colour are left untouched.
+#'
+#' @param brand List or NULL. Parsed `_brand.yml` contents.
+#' @return The brand list with `color` roles resolved against `color.palette`.
+#' @keywords internal
+resolve_brand_palette <- function(brand) {
+  palette <- brand$color$palette
+  if (is.null(brand$color) || is.null(palette)) return(brand)
+  for (role in setdiff(names(brand$color), "palette")) {
+    val <- brand$color[[role]]
+    if (is.character(val) && length(val) == 1L && val %in% names(palette)) {
+      brand$color[[role]] <- palette[[val]]
+    }
+  }
+  brand
 }

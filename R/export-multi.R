@@ -21,6 +21,11 @@ export_multi_app <- function(appdir, destdir, config,
   suite_normalized <- normalize_app_type_arg(raw_type, runtime_strategy %||% config$build$runtime_strategy)
   app_type <- suite_normalized$app_type %||% "r-shiny"
   runtime_strategy <- runtime_strategy %||% suite_normalized$runtime_strategy %||% config$build$runtime_strategy %||% "shinylive"
+  # The runtime_strategy argument must win over the config file's suite default,
+  # exactly as it does for single apps. Write the resolved value back so that
+  # resolve_app_strategy() and validate_suite_strategies() use the caller's
+  # choice for every app that does not set its own per-app runtime_strategy.
+  config$build$runtime_strategy <- runtime_strategy
 
   if (verbose) {
     cli::cli_h1("Exporting multi-app Shiny suite to Electron")

@@ -15,8 +15,6 @@ ui <- page_navbar(
   theme = bs_theme(
     version = 5,
     preset = "shiny",
-    base_font = font_google("DM Sans"),
-    heading_font = font_google("DM Sans"),
     font_scale = 0.92
   ),
   fillable = TRUE,

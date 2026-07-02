@@ -1,0 +1,15 @@
+# Posit brand.yml (https://posit-dev.github.io/brand-yml/)
+# Deliberately distinctive so it is obvious whether the brand is applied.
+meta:
+  name: "shinyelectron Brand Demo"
+
+color:
+  palette:
+    plum: "#6d28d9"
+    mist: "#fdf7ff"
+  primary: plum
+  background: mist
+
+typography:
+  base:
+    family: Georgia

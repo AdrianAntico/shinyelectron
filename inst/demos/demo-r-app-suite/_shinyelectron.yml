@@ -4,7 +4,6 @@ app:
 
 build:
   type: "r-shiny"
-  runtime_strategy: "system"
 
 window:
   width: 1100

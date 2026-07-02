@@ -6,6 +6,13 @@ detect_backend <- function() {
   if (nzchar(Sys.getenv("DOCKER_CONTAINER", ""))) return("container (Docker)")
   if (nzchar(Sys.getenv("PODMAN_CONTAINER", ""))) return("container (Podman)")
 
+  # WebR compiles R to WebAssembly, so the platform is the reliable signal for
+  # the shinylive strategy. The working directory is not (it varies inside webR).
+  if (identical(R.version$os, "emscripten") ||
+      grepl("wasm|emscripten", R.version$platform, ignore.case = TRUE)) {
+    return("r-shinylive (WebR)")
+  }
+
   r_home <- R.home()
   wd <- getwd()
 
@@ -22,8 +29,6 @@ ui <- page_navbar(
   theme = bs_theme(
     version = 5,
     preset = "shiny",
-    base_font = font_google("DM Sans"),
-    heading_font = font_google("DM Sans"),
     font_scale = 0.92
   ),
   fillable = TRUE,

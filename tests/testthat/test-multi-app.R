@@ -157,6 +157,37 @@ test_that("export_multi_app emits serve descriptors for native and container app
   expect_null(box$serve$runtime_strategy)
 })
 
+test_that("export_multi_app: runtime_strategy argument overrides the suite config default", {
+  skip_if_not_installed("renv")
+
+  appdir <- withr::local_tempdir()
+  dir.create(file.path(appdir, "apps", "dash"), recursive = TRUE)
+  writeLines("library(shiny)\nshinyApp(ui=fluidPage(), server=function(i,o){})",
+             file.path(appdir, "apps", "dash", "app.R"))
+
+  # The config pins a native strategy, but the caller passes a different one.
+  # The argument must win for apps that set no per-app strategy, exactly as it
+  # does for single apps. Before the fix the pinned "system" leaked through
+  # resolve_app_strategy() and every suite app was staged as native, so the
+  # shinylive/container/etc. suite variants were really system builds.
+  config <- list(
+    app = list(name = "Suite", version = "1.0.0"),
+    build = list(type = "r-shiny", runtime_strategy = "system"),
+    apps = list(list(id = "dash", name = "Dashboard", path = "./apps/dash"))
+  )
+
+  destdir <- file.path(withr::local_tempdir(), "out")
+  export_multi_app(appdir = appdir, destdir = destdir, config = config,
+                   app_name = "Suite", runtime_strategy = "container",
+                   build = FALSE, overwrite = TRUE, verbose = FALSE)
+
+  manifest <- jsonlite::fromJSON(fs::path(destdir, "apps-manifest.json"),
+                                 simplifyVector = FALSE)
+  dash <- manifest$apps[[1]]
+  expect_equal(dash$serve$kind, "container")
+  expect_false(identical(dash$serve$runtime_strategy, "system"))
+})
+
 # --- Integration Tests ---
 
 test_that("export detects multi-app and copies all apps", {

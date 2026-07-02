@@ -40,6 +40,9 @@ multi-app suites.
   `pyproject.toml` for Python.
 * A configurable lifecycle splash and preloader report startup progress, and a
   system tray and application menu are set through `_shinyelectron.yml`.
+* The Electron shell streams the renderer console (webR, Pyodide, and Shiny
+  output) into the app log, so browser-side messages and errors appear alongside
+  the main-process logs.
 * `app_check()` validates an app before building, `wizard()` generates a config
   interactively, `show_config()` prints the merged configuration, and
   `available_examples()` and `example_app()` browse the bundled demos.
@@ -49,11 +52,17 @@ multi-app suites.
 
 ## Minor improvements and fixes
 
+* The `runtime_strategy` argument overrides a suite's `build.runtime_strategy`
+  for apps that set no per-app strategy, so a suite built as `shinylive` really
+  is shinylive rather than falling back to the config default.
+* A `_brand.yml` that names palette colors (for example `primary: plum`) resolves
+  those references before theming the shell.
+* Error screens allow selecting and copying the message and log details.
 * `build_electron_app()` refuses to overwrite protected directories such as `~`,
   `/`, and `R.home()`.
 * `convert_shiny_to_shinylive()` removes its temporary copy on every exit path.
-* `export()` and `export_multi_app()` clean up partial output when a build
-  fails, so a retry no longer needs `overwrite = TRUE`.
+* `export()` cleans up partial output when a build fails, so a retry no longer
+  needs `overwrite = TRUE`, for single apps and multi-app suites alike.
 * `export()` no longer aborts or deletes a finished build when a `run_after` or
   `open_after` step fails; those steps now only warn.
 * `init_config()` escapes app names so the generated YAML round-trips, and

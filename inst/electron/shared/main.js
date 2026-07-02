@@ -511,6 +511,24 @@ function createWindow() {
   mainWindow.on('move', scheduleSaveWindowState);
   mainWindow.on('close', saveWindowState);
 
+  // Stream the renderer console (webR / Pyodide / Shiny output and errors, which
+  // otherwise surface only in DevTools) into the app log so every log lives in
+  // one place. Handles both the newer single-object console-message signature
+  // and the classic positional one.
+  mainWindow.webContents.on('console-message', (e, level, message) => {
+    const lvl = (e && e.level !== undefined) ? e.level : level;
+    const msg = (e && e.message !== undefined) ? e.message : message;
+    const isErr = lvl === 'error' || lvl === 'warning' ||
+      (typeof lvl === 'number' && lvl >= 2);
+    log(isErr ? 'error' : 'info', `[renderer] ${msg}`);
+  });
+  mainWindow.webContents.on('did-fail-load', (event, code, desc, url) => {
+    log('error', `[renderer] failed to load ${url}: ${desc} (${code})`);
+  });
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    log('error', `[renderer] process gone: ${details && details.reason}`);
+  });
+
   // Multi-app: load launcher instead of starting backend immediately
   if (appsManifest) {
     mainWindow.loadFile('launcher.html');

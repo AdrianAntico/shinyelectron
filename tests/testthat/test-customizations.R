@@ -135,3 +135,19 @@ test_that("validate_config rejects negative splash.duration and falls back to de
   expect_warning(validated <- validate_config(bad), "splash.duration")
   expect_equal(validated$splash$duration, SHINYELECTRON_DEFAULTS$splash$duration)
 })
+
+test_that("resolve_brand_palette resolves brand.yml color references", {
+  brand <- list(color = list(
+    palette = list(plum = "#6d28d9", mist = "#fdf7ff"),
+    primary = "plum", background = "mist", foreground = "#111111"
+  ))
+  out <- resolve_brand_palette(brand)
+  expect_equal(out$color$primary, "#6d28d9")     # palette reference resolved
+  expect_equal(out$color$background, "#fdf7ff")   # palette reference resolved
+  expect_equal(out$color$foreground, "#111111")   # literal colour left untouched
+
+  # A brand with no palette is returned unchanged.
+  plain <- list(color = list(primary = "#abcdef"))
+  expect_identical(resolve_brand_palette(plain), plain)
+  expect_identical(resolve_brand_palette(list()), list())
+})
