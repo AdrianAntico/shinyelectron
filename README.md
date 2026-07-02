@@ -71,6 +71,19 @@ guide](https://r-pkg.thecoatlessprofessor.com/shinyelectron/articles/download-de
 for the full set and what each one needs, or browse the [releases
 page](https://github.com/coatless-rpkg/shinyelectron/releases/latest).
 
+> [!NOTE]
+>
+> The macOS demos are signed and notarized under our Apple Developer
+> Program membership (\$99/year), so they open cleanly. The Windows
+> demos are unsigned, so the first launch shows a Microsoft Defender
+> SmartScreen prompt: choose **More info**, then **Run anyway**. If you
+> distribute your own apps, you will need to pay for code signing on
+> each platform to avoid these prompts, a recurring budget line item for
+> organizations. Our development is on macOS and Linux, so if you would
+> like to help fund a Windows certificate for these demos, sponsorship
+> is welcome at
+> [github.com/sponsors/coatless](https://github.com/sponsors/coatless).
+
 ## What you can export
 
 shinyelectron supports two app types, autodetected from the contents of
