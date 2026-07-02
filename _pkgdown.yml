@@ -115,6 +115,7 @@ reference:
     desc: "Pre-flight checks, examples, and diagnostics"
     contents:
       - app_check
+      - app_dependencies
       - available_examples
       - example_app
 
