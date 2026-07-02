@@ -70,12 +70,15 @@ convert_shiny_to_shinylive <- function(appdir, output_dir, subdir = NULL, overwr
   }
 
   # shinylive::export() builds the WebAssembly bundle from the packages installed
-  # in this R session, so every package the app uses must be installed here even
-  # though it ultimately runs in webR. Surface any missing ones as an actionable
-  # export issue instead of letting shinylive fail mid-conversion with a cryptic
-  # "there is no package called ..." error.
-  missing <- setdiff(detect_r_dependencies(appdir),
-                     rownames(utils::installed.packages()))
+  # in this R session, so packages the app uses must be installed here even though
+  # they ultimately run in webR. shinylive resolves shiny, bslib, and renv from the
+  # webR repositories itself, so only the app's other packages need to be present.
+  # Surface any that are missing as an actionable export issue instead of letting
+  # shinylive fail mid-conversion with a cryptic "there is no package called ..."
+  # error.
+  core_pkgs <- c("shiny", "bslib", "renv")
+  app_deps <- setdiff(detect_r_dependencies(appdir), core_pkgs)
+  missing <- setdiff(app_deps, rownames(utils::installed.packages()))
   if (length(missing) > 0) {
     install_hint <- sprintf("install.packages(c(%s))",
                             paste0('"', missing, '"', collapse = ", "))
