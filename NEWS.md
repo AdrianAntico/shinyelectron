@@ -46,6 +46,8 @@ multi-app suites.
 * `app_check()` validates an app before building, `wizard()` generates a config
   interactively, `show_config()` prints the merged configuration, and
   `available_examples()` and `example_app()` browse the bundled demos.
+* `app_dependencies()` reports the R or Python packages a Shiny app or multi-app
+  suite uses, which helps install an app's dependencies before a shinylive build.
 * Apps can supply a Posit `_brand.yml` for theming.
 * Prebuilt demo installers are published for every strategy and platform, listed
   in the new Download Prebuilt Demos article.
@@ -58,6 +60,9 @@ multi-app suites.
 * A `_brand.yml` that names palette colors (for example `primary: plum`) resolves
   those references before theming the shell.
 * Error screens allow selecting and copying the message and log details.
+* Building with the shinylive strategy checks that the app's R packages are
+  installed and names any that are missing, since `shinylive::export()` compiles
+  the WebAssembly bundle from installed packages.
 * `build_electron_app()` refuses to overwrite protected directories such as `~`,
   `/`, and `R.home()`.
 * `convert_shiny_to_shinylive()` removes its temporary copy on every exit path.

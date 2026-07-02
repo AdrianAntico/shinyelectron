@@ -143,3 +143,20 @@ test_that("convert_shiny_to_shinylive single-app (subdir=NULL) wipes and validat
   expect_equal(export_args$subdir, "")                       # NULL -> "" default kept
   expect_false(file.exists(file.path(outdir, "stale.txt")))  # overwrite still wipes
 })
+
+test_that("shinylive conversion surfaces uninstalled app packages", {
+  skip_if_not_installed("shinylive")
+  appdir <- withr::local_tempdir()
+  writeLines("library(shiny)\nshinyApp(fluidPage(), function(i, o) {})",
+             file.path(appdir, "app.R"))
+  # Pretend the app needs a package that is not installed; the conversion should
+  # abort with an actionable error rather than let shinylive fail cryptically.
+  local_mocked_bindings(
+    detect_r_dependencies = function(appdir) c("shiny", "notarealpkg99")
+  )
+  expect_error(
+    convert_shiny_to_shinylive(appdir, file.path(withr::local_tempdir(), "out"),
+                               overwrite = TRUE, verbose = FALSE),
+    class = "shinyelectron_shinylive_missing_deps"
+  )
+})

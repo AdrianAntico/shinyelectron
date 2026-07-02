@@ -391,3 +391,17 @@ test_that("resolve_app_dependencies returns NULL for the shinylive strategy", {
   )
   expect_null(result)
 })
+
+test_that("app_dependencies detects R packages for single apps and suites", {
+  appdir <- withr::local_tempdir()
+  writeLines("library(shiny)\nlibrary(bslib)\nshinyApp(bslib::page_fluid(), function(i, o) {})",
+             file.path(appdir, "app.R"))
+  expect_true(all(c("shiny", "bslib") %in% app_dependencies(appdir)))
+
+  # A suite-like directory has no single entrypoint; resolve by files present.
+  suite <- withr::local_tempdir()
+  dir.create(file.path(suite, "apps", "a"), recursive = TRUE)
+  writeLines("library(shiny)\nlibrary(bslib)\nshinyApp(fluidPage(), function(i, o) {})",
+             file.path(suite, "apps", "a", "app.R"))
+  expect_true("bslib" %in% app_dependencies(suite))
+})

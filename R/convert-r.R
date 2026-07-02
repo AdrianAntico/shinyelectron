@@ -69,6 +69,24 @@ convert_shiny_to_shinylive <- function(appdir, output_dir, subdir = NULL, overwr
     ))
   }
 
+  # shinylive::export() builds the WebAssembly bundle from the packages installed
+  # in this R session, so every package the app uses must be installed here even
+  # though it ultimately runs in webR. Surface any missing ones as an actionable
+  # export issue instead of letting shinylive fail mid-conversion with a cryptic
+  # "there is no package called ..." error.
+  missing <- setdiff(detect_r_dependencies(appdir),
+                     rownames(utils::installed.packages()))
+  if (length(missing) > 0) {
+    install_hint <- sprintf("install.packages(c(%s))",
+                            paste0('"', missing, '"', collapse = ", "))
+    cli::cli_abort(c(
+      "Cannot convert to shinylive: required packages are not installed.",
+      "x" = "Not installed: {.pkg {missing}}",
+      "i" = "shinylive compiles the WebAssembly bundle from your installed packages, so they must be present here first.",
+      "i" = "Install them, then export again: {.code {install_hint}}"
+    ), class = "shinyelectron_shinylive_missing_deps")
+  }
+
   if (verbose) {
     pb <- cli::cli_progress_bar("Converting to shinylive", total = 4)
   }

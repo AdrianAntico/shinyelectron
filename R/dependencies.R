@@ -123,3 +123,47 @@ resolve_app_dependencies <- function(appdir, app_type, runtime_strategy, config)
     )
   }
 }
+
+#' Detect an app's package dependencies
+#'
+#' Scans a Shiny app's source for the R or Python packages it uses, with the
+#' same detection shinyelectron applies at build time. This is useful before a
+#' shinylive build, in CI especially, because `shinylive::export()` compiles the
+#' WebAssembly bundle from the packages installed in the current session, so an
+#' app's dependencies must be installed before conversion.
+#'
+#' @param appdir Character string. Path to the app or multi-app suite directory.
+#' @param app_type Character string or `NULL`. `"r-shiny"` or `"py-shiny"`, or
+#'   `NULL` to autodetect from `appdir`.
+#' @return Character vector of detected package names, excluding base R packages
+#'   (for R) or the Python standard library (for Python).
+#' @examples
+#' \dontrun{
+#' # Install an app's R dependencies before a shinylive build
+#' pkgs <- app_dependencies("path/to/app")
+#' install.packages(pkgs)
+#' }
+#' @export
+app_dependencies <- function(appdir, app_type = NULL) {
+  if (is.null(app_type)) {
+    # A single app autodetects from its entrypoint; a multi-app suite has none,
+    # so fall back to the file types present under appdir.
+    app_type <- tryCatch(detect_app_type(appdir), error = function(e) NULL)
+  }
+  if (is.null(app_type)) {
+    has_r  <- length(list.files(appdir, pattern = "\\.[Rr]$", recursive = TRUE)) > 0
+    has_py <- length(list.files(appdir, pattern = "\\.py$", recursive = TRUE)) > 0
+    app_type <- if (has_py && !has_r) "py-shiny" else if (has_r) "r-shiny" else NULL
+    if (is.null(app_type)) {
+      cli::cli_abort(c(
+        "Could not determine the app language for {.path {appdir}}.",
+        "i" = "Pass {.arg app_type} explicitly (\"r-shiny\" or \"py-shiny\")."
+      ))
+    }
+  }
+  if (grepl("^r", app_type)) {
+    detect_r_dependencies(appdir)
+  } else {
+    detect_py_dependencies(appdir)
+  }
+}
