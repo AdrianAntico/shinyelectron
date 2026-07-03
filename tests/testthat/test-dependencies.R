@@ -309,6 +309,23 @@ test_that("GitHub R package specs require bundled strategy", {
   )
 })
 
+test_that("local R package paths resolve relative to the app directory", {
+  root <- withr::local_tempdir()
+  appdir <- file.path(root, "app")
+  pkgdir <- file.path(root, "packages", "mypkg")
+  dir.create(appdir)
+  dir.create(pkgdir, recursive = TRUE)
+
+  resolved <- resolve_local_r_packages(
+    "mypkg=local::../packages/mypkg",
+    appdir
+  )
+
+  expect_equal(r_package_name(resolved), "mypkg")
+  expect_true(startsWith(resolved, "mypkg=local::"))
+  expect_true(grepl("packages/mypkg$", resolved))
+})
+
 test_that("merge_py_dependencies combines detected and declared", {
   detected <- c("pandas", "numpy")
   config_deps <- list(
@@ -338,6 +355,19 @@ test_that("generate_dependency_manifest creates valid JSON for R", {
   expect_true("shiny" %in% parsed$packages)
   expect_equal(parsed$repos[[1]], "https://cloud.r-project.org")
   expect_true(parsed$binary_only)
+})
+
+test_that("R manifest separates build sources from runtime package names", {
+  spec <- "mypkg=github::me/different-repository@v1"
+  manifest <- generate_dependency_manifest(
+    packages = c("shiny", spec),
+    language = "r",
+    repos = list("https://cloud.r-project.org")
+  )
+
+  parsed <- jsonlite::fromJSON(manifest, simplifyVector = FALSE)
+  expect_equal(unlist(parsed$packages), c("shiny", "mypkg"))
+  expect_equal(unlist(parsed$package_sources), c("shiny", spec))
 })
 
 test_that("generate_dependency_manifest creates valid JSON for Python", {

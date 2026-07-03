@@ -312,9 +312,10 @@ These keys sit under `dependencies.r` and apply to the `bundled`, `auto-download
 | `r.repos` | list of strings | `["https://cloud.r-project.org"]` | CRAN-compatible repository URLs to use when installing R packages |
 | `r.lib_path` | string | `null` | Custom library path where R packages are installed; `null` uses the default R library |
 
-For bundled R apps, `r.packages` also accepts pak-style GitHub references.
-Use an explicit package-name alias when the repository name differs from the
-R package name:
+For bundled R apps, `r.packages` also accepts pak-style GitHub and local
+package references. Use an explicit package-name alias when the repository
+name differs from the R package name. Local paths are resolved relative to the
+directory containing the Shiny app:
 
 ```yaml
 dependencies:
@@ -322,13 +323,16 @@ dependencies:
     packages:
       - github::owner/package
       - mypkg=github::owner/repository@v1.2.0
+      - internaltools=local::../packages/internaltools
     repos:
       - https://cloud.r-project.org
 ```
 
 The optional `@ref` may be a branch, tag, or commit. Private repositories use
-`GITHUB_PAT` or `GH_TOKEN` from the build environment. GitHub references
-currently require `runtime_strategy: bundled`.
+`GITHUB_PAT` or `GH_TOKEN` from the build environment. Local sources may be
+package directories or package archives. GitHub and local references currently
+require `runtime_strategy: bundled`; the installed package is embedded, and
+the source path is not needed on the end user's computer.
 
 #### Python-specific dependency options
 

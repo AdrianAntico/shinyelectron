@@ -162,7 +162,9 @@ build_electron_app <- function(app_dir, output_dir, app_name = NULL, app_type = 
       if (fs::file_exists(dep_manifest_path)) {
         dep_manifest <- jsonlite::fromJSON(dep_manifest_path, simplifyVector = FALSE)
         if (identical(dep_manifest$language, "r")) {
-          packages <- unlist(dep_manifest$packages)
+          packages <- unlist(
+            dep_manifest$package_sources %||% dep_manifest$packages
+          )
           repos <- unlist(dep_manifest$repos)
         }
       }
@@ -175,6 +177,9 @@ build_electron_app <- function(app_dir, output_dir, app_name = NULL, app_type = 
         arch = arch[1],
         verbose = verbose
       )
+      # GitHub/local references are needed only while constructing the bundled
+      # library. Ship ordinary package names to the runtime dependency checker.
+      strip_dependency_package_sources(dep_manifest_path)
     }
 
     if (runtime_strategy == "bundled" && grepl("^py-", app_type)) {
