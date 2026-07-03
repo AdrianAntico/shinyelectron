@@ -43,7 +43,23 @@ library. End users do not need R, the original package directory, repository
 access, or credentials. Bundling is distribution, not source-code protection:
 installed package contents remain inspectable by a determined user.
 
-Declare package sources in `_shinyelectron.yml` beside `app.R`:
+For example, a Windows user might keep an app and two unpublished packages in
+one project:
+
+```text
+C:/Users/alex/Documents/acme-desktop/
+|-- shiny-app/
+|   |-- app.R
+|   `-- _shinyelectron.yml
+|-- packages/
+|   |-- acmeData/
+|   |   |-- DESCRIPTION
+|   |   `-- R/
+|   `-- acmeReports_2.1.0.tar.gz
+`-- builds/
+```
+
+The fake `shiny-app/_shinyelectron.yml` would look like this:
 
 ```yaml
 dependencies:
@@ -53,24 +69,33 @@ dependencies:
       - github::owner/package@v1.2.0
 
       # Use an alias when the repository and R package names differ
-      - internaltools=github::company/internal-tools@main
+      - acmeTheme=github::acme-corp/acme-shiny-theme@main
 
       # Resolved relative to the Shiny app directory
-      - localmodel=local::../packages/localmodel
+      - acmeData=local::../packages/acmeData
 
       # A versioned local source archive works too
-      - reporting=local::../packages/reporting_2.1.0.tar.gz
+      - acmeReports=local::../packages/acmeReports_2.1.0.tar.gz
 ```
 
-Build these apps with the bundled strategy:
+The user can then build from any R working directory by using explicit paths:
 
 ```r
+project_dir <- "C:/Users/alex/Documents/acme-desktop"
+
 export(
-  appdir = "path/to/shiny-app",
-  destdir = "path/to/output",
-  runtime_strategy = "bundled"
+  appdir = file.path(project_dir, "shiny-app"),
+  destdir = file.path(project_dir, "builds", "acme-desktop-app"),
+  app_name = "Acme Analytics",
+  runtime_strategy = "bundled",
+  overwrite = TRUE
 )
 ```
+
+The `local::../packages/...` paths are evaluated from `shiny-app`, where the
+YAML file lives, not from the current R working directory. The resulting Windows
+installer is written beneath
+`builds/acme-desktop-app/electron-app/dist/`.
 
 Public GitHub and local packages require no credentials. Private GitHub
 repositories use `GITHUB_PAT` or `GH_TOKEN` from the build environment.
