@@ -24,6 +24,51 @@ users double-click to open.
 > not yet on CRAN and may have rough edges. **Not recommended for
 > production applications at this time.**
 
+## Private and local R packages
+
+R packages do not need to be published on CRAN to ship with a desktop app.
+With `runtime_strategy = "bundled"`, shinyelectron can install packages
+directly from GitHub or the build machine and embed them in the app's private R
+library. End users do not need R, the original package directory, repository
+access, or credentials. Bundling is distribution, not source-code protection:
+installed package contents remain inspectable by a determined user.
+
+Declare package sources in `_shinyelectron.yml` beside `app.R`:
+
+``` yaml
+dependencies:
+  r:
+    packages:
+      # Public GitHub repository; @ref may be a branch, tag, or commit
+      - github::owner/package@v1.2.0
+
+      # Use an alias when the repository and R package names differ
+      - internaltools=github::company/internal-tools@main
+
+      # Resolved relative to the Shiny app directory
+      - localmodel=local::../packages/localmodel
+
+      # A versioned local source archive works too
+      - reporting=local::../packages/reporting_2.1.0.tar.gz
+```
+
+Build these apps with the bundled strategy:
+
+``` r
+export(
+  appdir = "path/to/shiny-app",
+  destdir = "path/to/output",
+  runtime_strategy = "bundled"
+)
+```
+
+Public GitHub and local packages require no credentials. Private GitHub
+repositories use `GITHUB_PAT` or `GH_TOKEN` from the build environment.
+Tokens are build-time secrets: they are not required by end users and must
+never be placed in app source, `_shinyelectron.yml`, or an installer.
+Relative local paths and pinned source archives are the simplest reproducible
+option for internal or corporate builds.
+
 ## Install
 
 ``` r
