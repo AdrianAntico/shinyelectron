@@ -19,6 +19,18 @@ is_github_r_package <- function(x) {
         perl = TRUE)
 }
 
+#' Identify a local R package reference
+#' @keywords internal
+is_local_r_package <- function(x) {
+  grepl("^[^=]+[=]local::", x)
+}
+
+#' Identify an R package reference installed by pak
+#' @keywords internal
+is_pak_r_package <- function(x) {
+  is_github_r_package(x) | is_local_r_package(x)
+}
+
 #' Infer the installed package name from a GitHub package reference
 #' @keywords internal
 github_r_package_name <- function(x) {
@@ -31,6 +43,43 @@ github_r_package_name <- function(x) {
   ref <- sub("@[^/]*$", "", ref)
   repo <- basename(ref)
   ifelse(aliased, alias, repo)
+}
+
+#' Return the installed package name for any supported package declaration
+#' @keywords internal
+r_package_name <- function(x) {
+  result <- x
+  pak_ref <- is_pak_r_package(x)
+  result[pak_ref] <- ifelse(
+    is_local_r_package(x[pak_ref]),
+    sub("=.*$", "", x[pak_ref]),
+    github_r_package_name(x[pak_ref])
+  )
+  result
+}
+
+#' Resolve local package paths relative to the Shiny application
+#' @keywords internal
+resolve_local_r_packages <- function(packages, appdir) {
+  local <- is_local_r_package(packages)
+  if (!any(local)) return(packages)
+
+  packages[local] <- vapply(packages[local], function(spec) {
+    package_name <- sub("=.*$", "", spec)
+    package_path <- sub("^[^=]+[=]local::", "", spec)
+    if (!fs::is_absolute_path(package_path)) {
+      package_path <- fs::path(appdir, package_path)
+    }
+    package_path <- fs::path_abs(package_path)
+    if (!fs::file_exists(package_path) && !fs::dir_exists(package_path)) {
+      cli::cli_abort(c(
+        "Local R package does not exist: {.path {package_path}}",
+        "i" = "Local package paths are resolved relative to {.path {appdir}}."
+      ))
+    }
+    paste0(package_name, "=local::", gsub("\\\\", "/", package_path))
+  }, character(1))
+  packages
 }
 
 #' Detect R package dependencies from source files
@@ -83,10 +132,9 @@ merge_r_dependencies <- function(detected, config_deps) {
   declared <- unlist(config_deps$r$packages %||% list())
   extra <- unlist(config_deps$extra_packages %||% list())
 
-  github_specs <- c(declared, extra)
-  github_specs <- github_specs[is_github_r_package(github_specs)]
-  github_names <- github_r_package_name(github_specs)
-  detected <- setdiff(detected, github_names)
+  pak_specs <- c(declared, extra)
+  pak_specs <- pak_specs[is_pak_r_package(pak_specs)]
+  detected <- setdiff(detected, r_package_name(pak_specs))
 
   packages <- if (isTRUE(config_deps$auto_detect %||% TRUE)) {
     sort(unique(c(detected, declared, extra)))

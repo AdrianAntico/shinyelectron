@@ -348,6 +348,14 @@ build_multi_app <- function(apps_dir, output_dir, app_name,
       arch = arch[1],
       verbose = verbose
     )
+    for (manifest_path in fs::dir_ls(
+      src_apps_dir,
+      recurse = TRUE,
+      regexp = "dependencies[.]json$",
+      type = "file"
+    )) {
+      strip_dependency_package_sources(manifest_path)
+    }
   }
   if (py_bundled) {
     if (verbose) cli::cli_alert_info("Embedding Python runtime for bundled apps...")

@@ -91,9 +91,9 @@ embed_r_runtime <- function(output_dir, packages, repos, version,
 
     pkgs <- unlist(packages)
     repos <- unlist(repos)
-    github_specs <- pkgs[is_github_r_package(pkgs)]
-    github_names <- github_r_package_name(github_specs)
-    cran_pkgs <- pkgs[!is_github_r_package(pkgs)]
+    pak_specs <- pkgs[is_pak_r_package(pkgs)]
+    pak_names <- r_package_name(pak_specs)
+    cran_pkgs <- pkgs[!is_pak_r_package(pkgs)]
 
     # Fetch the available-packages database once (avoids repeated CRAN network
     # calls). A GitHub-only dependency set does not need this index at all.
@@ -115,13 +115,13 @@ embed_r_runtime <- function(output_dir, packages, repos, version,
     pre_installed <- list.dirs(lib_path, recursive = FALSE, full.names = FALSE)
     pre_installed <- pre_installed[nzchar(pre_installed)]
     all_pkgs <- setdiff(all_pkgs, pre_installed)
-    github_specs <- github_specs[!github_names %in% pre_installed]
+    pak_specs <- pak_specs[!pak_names %in% pre_installed]
 
-    if (length(all_pkgs) == 0 && length(github_specs) == 0) {
+    if (length(all_pkgs) == 0 && length(pak_specs) == 0) {
       if (verbose) cli::cli_alert_info("All dependencies already present in bundled R library")
     } else {
       if (verbose) {
-        install_count <- length(all_pkgs) + length(github_specs)
+        install_count <- length(all_pkgs) + length(pak_specs)
         cli::cli_alert_info("Installing {install_count} package{?s} into bundled library")
       }
 
@@ -155,7 +155,7 @@ embed_r_runtime <- function(output_dir, packages, repos, version,
           r_literal(all_pkgs), lib_literal, repo_literal, type_clause
         ))
       }
-      if (length(github_specs) > 0) {
+      if (length(pak_specs) > 0) {
         r_steps <- c(
           r_steps,
           sprintf(
@@ -173,7 +173,7 @@ embed_r_runtime <- function(output_dir, packages, repos, version,
           ),
           sprintf(
             "pak::pkg_install(%s, lib = %s, dependencies = NA, upgrade = FALSE, ask = FALSE)",
-            r_literal(github_specs), lib_literal
+            r_literal(pak_specs), lib_literal
           )
         )
       }
@@ -195,7 +195,7 @@ embed_r_runtime <- function(output_dir, packages, repos, version,
       # than "no package called 'htmltools'" from a running Shiny server.
       present <- c(pre_installed,
                    list.dirs(lib_path, recursive = FALSE, full.names = FALSE))
-      expected_pkgs <- unique(c(cran_pkgs, github_names))
+      expected_pkgs <- unique(c(cran_pkgs, pak_names))
       missing_pkgs <- setdiff(expected_pkgs, present)
       if (length(missing_pkgs) > 0) {
         cli::cli_abort(c(

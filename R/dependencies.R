@@ -57,12 +57,21 @@ query_sysreqs <- function(pkgs, distribution = "ubuntu", release = "24.04") {
 #' @keywords internal
 generate_dependency_manifest <- function(packages, language,
                                          repos = NULL, index_urls = NULL) {
+  package_sources <- packages
+  runtime_packages <- packages
+  if (language == "r") {
+    runtime_packages <- r_package_name(packages)
+  }
   manifest <- list(
     schema_version = MANIFEST_SCHEMA_VERSION,
     language = language,
-    packages = as.list(packages),
+    packages = as.list(runtime_packages),
     binary_only = TRUE
   )
+
+  if (language == "r" && any(package_sources != runtime_packages)) {
+    manifest$package_sources <- as.list(package_sources)
+  }
 
   if (language == "r") {
     manifest$repos <- repos %||% SHINYELECTRON_DEFAULTS$dependencies$r$repos
@@ -75,9 +84,9 @@ generate_dependency_manifest <- function(packages, language,
   # distribution per call, so query Debian/Ubuntu and Fedora/RedHat separately.
   # as.list() forces JSON array shape so the JS consumer can iterate even when
   # a distro has exactly one system package.
-  cran_packages <- packages
+  cran_packages <- package_sources
   if (language == "r") {
-    cran_packages <- packages[!is_github_r_package(packages)]
+    cran_packages <- package_sources[!is_pak_r_package(package_sources)]
   }
   if (language == "r" && length(cran_packages) > 0) {
     manifest$system_deps <- list(
@@ -87,6 +96,20 @@ generate_dependency_manifest <- function(packages, language,
   }
 
   jsonlite::toJSON(manifest, pretty = TRUE, auto_unbox = TRUE)
+}
+
+#' Remove build-only package source references from a dependency manifest
+#' @keywords internal
+strip_dependency_package_sources <- function(path) {
+  if (!fs::file_exists(path)) return(invisible(FALSE))
+  manifest <- jsonlite::fromJSON(path, simplifyVector = FALSE)
+  if (is.null(manifest$package_sources)) return(invisible(FALSE))
+  manifest$package_sources <- NULL
+  writeLines(
+    jsonlite::toJSON(manifest, pretty = TRUE, auto_unbox = TRUE),
+    path
+  )
+  invisible(TRUE)
 }
 
 #' Resolve application dependencies
@@ -112,12 +135,13 @@ resolve_app_dependencies <- function(appdir, app_type, runtime_strategy, config)
   if (grepl("^r-", app_type)) {
     detected <- detect_r_dependencies(appdir)
     merged <- merge_r_dependencies(detected, config_deps)
-    github_specs <- merged$packages[is_github_r_package(merged$packages)]
-    if (length(github_specs) > 0 && runtime_strategy != "bundled") {
+    merged$packages <- resolve_local_r_packages(merged$packages, appdir)
+    pak_specs <- merged$packages[is_pak_r_package(merged$packages)]
+    if (length(pak_specs) > 0 && runtime_strategy != "bundled") {
       cli::cli_abort(c(
-        "GitHub R packages currently require the bundled runtime strategy",
+        "GitHub and local R packages currently require the bundled runtime strategy",
         "i" = "Set {.code runtime_strategy = \"bundled\"} in {.code export()}.",
-        "i" = "GitHub package: {github_specs[1]}"
+        "i" = "Package source: {pak_specs[1]}"
       ))
     }
     list(

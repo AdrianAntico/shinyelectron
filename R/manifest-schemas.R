@@ -20,6 +20,7 @@
 #'   "schema_version": "2",
 #'   "language": "r" | "python",
 #'   "packages": ["shiny", "bslib", ...],
+#'   "package_sources": ["shiny", "mypkg=github::owner/repo"], // optional, R build only
 #'   "binary_only": true,
 #'   "repos": ["https://cloud.r-project.org"],       // R only
 #'   "index_urls": ["https://pypi.org/simple"],      // Python only
