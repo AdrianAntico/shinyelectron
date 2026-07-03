@@ -27,10 +27,10 @@ validate_python_available <- function() {
 validate_python_shinylive_installed <- function() {
   shinylive_cmd <- Sys.which("shinylive")
   if (nzchar(shinylive_cmd)) {
-    result <- processx::run(
+    result <- run_command_safe(
       "shinylive", c("--version"),
       env = python_subprocess_env(),
-      error_on_status = FALSE, timeout = 30
+      timeout = 30
     )
     cmd_label <- "shinylive"
   } else {
@@ -38,10 +38,10 @@ validate_python_shinylive_installed <- function() {
     if (is.null(python_cmd)) {
       cli::cli_abort("Python is required but was not found")
     }
-    result <- processx::run(
+    result <- run_command_safe(
       python_cmd, c("-m", "shinylive", "--version"),
       env = python_subprocess_env(),
-      error_on_status = FALSE, timeout = 30
+      timeout = 30
     )
     cmd_label <- paste(python_cmd, "-m shinylive")
   }
@@ -85,11 +85,10 @@ validate_python_shiny_installed <- function() {
     cli::cli_abort("Python is required but was not found")
   }
 
-  result <- processx::run(
+  result <- run_command_safe(
     python_cmd,
     c("-c", "import shiny; print(shiny.__version__)"),
     env = python_subprocess_env(),
-    error_on_status = FALSE,
     timeout = 30
   )
 

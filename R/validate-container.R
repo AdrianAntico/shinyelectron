@@ -18,7 +18,7 @@ validate_container_available <- function(preference = NULL) {
 
   tryCatch({
     result <- processx::run(engine, c("info"),
-                            error_on_status = FALSE, timeout = 15)
+                            error_on_status = FALSE, timeout = 15 * 1000)
     if (result$status != 0) {
       cli::cli_abort(c(
         "{.strong {engine}} is installed but not running",

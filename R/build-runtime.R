@@ -154,7 +154,7 @@ embed_r_runtime <- function(output_dir, packages, repos, version,
         bundled_rscript, c("-e", r_code),
         error_on_status = FALSE,
         echo = verbose,
-        timeout = 600
+        timeout = 600 * 1000
       )
 
       # Verify every app-direct package is present in the bundled library
@@ -235,7 +235,7 @@ embed_python_runtime <- function(output_dir, packages, index_urls, version,
     pip_result <- processx::run(
       bundled_python, pip_args,
       echo = verbose, spinner = verbose,
-      error_on_status = FALSE, timeout = 600
+      error_on_status = FALSE, timeout = 600 * 1000
     )
     if (pip_result$status != 0) {
       cli::cli_warn(c(

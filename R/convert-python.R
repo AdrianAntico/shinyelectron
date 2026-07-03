@@ -87,7 +87,7 @@ convert_py_to_shinylive <- function(appdir, output_dir, subdir = NULL, overwrite
       echo = verbose,
       spinner = verbose,
       error_on_status = FALSE,
-      timeout = 600
+      timeout = 600 * 1000
     )
 
     if (result$status != 0) {

@@ -96,20 +96,54 @@ validate_slug <- function(slug) {
 }
 #' Run a command safely and return the result
 #'
-#' Wraps processx::run with consistent error handling. Returns a list
+#' Wraps [base::system2()] with consistent error handling. The diagnostic
+#' probes deliberately use base R rather than processx so that a failure to
+#' start or stop an external program cannot abort the host RStudio session.
+#' Returns a list
 #' with status, stdout, and stderr. Never throws; failures are
 #' indicated by a non-zero status.
 #'
 #' @param command Character command to run.
 #' @param args Character vector of arguments.
 #' @param timeout Numeric timeout in seconds. Default 30.
+#' @param env Optional named character vector of environment variables.
 #' @return List with status, stdout, stderr.
 #' @keywords internal
-run_command_safe <- function(command, args = character(), timeout = 30) {
-  tryCatch(
-    processx::run(command, args, error_on_status = FALSE, timeout = timeout),
-    error = function(e) list(status = 1L, stdout = "", stderr = e$message)
-  )
+run_command_safe <- function(command, args = character(), timeout = 30,
+                             env = NULL) {
+  stdout_file <- tempfile("shinyelectron-stdout-")
+  stderr_file <- tempfile("shinyelectron-stderr-")
+  on.exit(unlink(c(stdout_file, stderr_file)), add = TRUE)
+
+  tryCatch({
+    system2_env <- env
+    if (!is.null(system2_env) && !is.null(names(system2_env))) {
+      system2_env <- paste0(names(system2_env), "=", system2_env)
+    }
+
+    status <- suppressWarnings(system2(
+      command,
+      vapply(args, shQuote, character(1)),
+      stdout = stdout_file,
+      stderr = stderr_file,
+      wait = TRUE,
+      timeout = timeout,
+      env = system2_env
+    ))
+
+    read_output <- function(path) {
+      if (!file.exists(path) || file.info(path)$size == 0) return("")
+      paste(readLines(path, warn = FALSE), collapse = "\n")
+    }
+
+    list(
+      status = as.integer(status %||% 0L),
+      stdout = read_output(stdout_file),
+      stderr = read_output(stderr_file)
+    )
+  }, error = function(e) {
+    list(status = 1L, stdout = "", stderr = conditionMessage(e))
+  })
 }
 #' Locate Rscript inside a bundled portable-R runtime directory
 #'
@@ -213,6 +247,9 @@ find_python_command <- function() {
 #'   [processx::run()].
 #' @keywords internal
 python_subprocess_env <- function() {
+  if (is.na(Sys.getenv("LD_LIBRARY_PATH", unset = NA_character_))) {
+    return(NULL)
+  }
   env <- Sys.getenv()
   env[!names(env) %in% "LD_LIBRARY_PATH"]
 }
