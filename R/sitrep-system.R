@@ -101,7 +101,10 @@ sitrep_electron_system <- function(verbose = TRUE) {
   }
 
   # Check npm
-  npm_result <- run_command_safe(get_npm_command(), "--version")
+  npm_result <- run_command_safe(
+    get_npm_command(), "--version",
+    env = nodejs_subprocess_env()
+  )
 
   if (npm_result$status == 0) {
     results$npm$installed <- TRUE

@@ -96,19 +96,30 @@ validate_slug <- function(slug) {
 }
 #' Run a command safely and return the result
 #'
-#' Wraps processx::run with consistent error handling. Returns a list
-#' with status, stdout, and stderr. Never throws; failures are
-#' indicated by a non-zero status.
+#' Wraps [processx::run()] with consistent error handling. Returns a list
+#' with status, stdout, and stderr. Never throws: a command that cannot be
+#' started, fails, or times out is reported as a non-zero status, so a
+#' diagnostic probe cannot abort the calling session.
+#'
+#' processx is used rather than [base::system2()] so that a supplied `env`
+#' replaces the child environment exactly and is honored on every platform
+#' (system2's `env` is a no-op on Windows for programs like node and python),
+#' and so arguments are passed as an argv array without shell quoting.
 #'
 #' @param command Character command to run.
 #' @param args Character vector of arguments.
 #' @param timeout Numeric timeout in seconds. Default 30.
+#' @param env Optional environment for the child process, passed straight to
+#'   [processx::run()]. Include the special `"current"` entry to extend the
+#'   current environment rather than replace it.
 #' @return List with status, stdout, stderr.
 #' @keywords internal
-run_command_safe <- function(command, args = character(), timeout = 30) {
+run_command_safe <- function(command, args = character(), timeout = 30,
+                             env = NULL) {
   tryCatch(
-    processx::run(command, args, error_on_status = FALSE, timeout = timeout),
-    error = function(e) list(status = 1L, stdout = "", stderr = e$message)
+    processx::run(command, args, env = env,
+                  error_on_status = FALSE, timeout = timeout),
+    error = function(e) list(status = 1L, stdout = "", stderr = conditionMessage(e))
   )
 }
 #' Locate Rscript inside a bundled portable-R runtime directory
