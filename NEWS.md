@@ -1,5 +1,9 @@
 # shinyelectron 0.2.0
 
+* Bundled R builds now accept pak-style GitHub package references in
+  `dependencies.r.packages`, including pinned refs and explicit package-name
+  aliases such as `mypkg=github::owner/repository@v1.2.0`.
+
 This release grows shinyelectron from an R shinylive exporter into a general
 Shiny-to-desktop toolkit, adding Python apps, five runtime strategies, and
 multi-app suites.

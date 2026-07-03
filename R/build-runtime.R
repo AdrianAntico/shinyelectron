@@ -91,18 +91,22 @@ embed_r_runtime <- function(output_dir, packages, repos, version,
 
     pkgs <- unlist(packages)
     repos <- unlist(repos)
+    github_specs <- pkgs[is_github_r_package(pkgs)]
+    github_names <- github_r_package_name(github_specs)
+    cran_pkgs <- pkgs[!is_github_r_package(pkgs)]
 
-    # Fetch the available-packages database once (avoids repeated
-    # CRAN network calls during the same export session).
-    avail_pkgs <- utils::available.packages(repos = repos)
-
-    # Resolve full dependency tree
-    all_deps <- tools::package_dependencies(
-      pkgs, db = avail_pkgs,
-      which = c("Depends", "Imports", "LinkingTo"),
-      recursive = TRUE
-    )
-    all_pkgs <- unique(c(pkgs, unlist(all_deps)))
+    # Fetch the available-packages database once (avoids repeated CRAN network
+    # calls). A GitHub-only dependency set does not need this index at all.
+    all_deps <- list()
+    if (length(cran_pkgs) > 0) {
+      avail_pkgs <- utils::available.packages(repos = repos)
+      all_deps <- tools::package_dependencies(
+        cran_pkgs, db = avail_pkgs,
+        which = c("Depends", "Imports", "LinkingTo"),
+        recursive = TRUE
+      )
+    }
+    all_pkgs <- unique(c(cran_pkgs, unlist(all_deps)))
 
     # Skip packages already present in the bundled library. Portable-R
     # ships with base + recommended + a few extras; reinstalling them is
@@ -111,16 +115,19 @@ embed_r_runtime <- function(output_dir, packages, repos, version,
     pre_installed <- list.dirs(lib_path, recursive = FALSE, full.names = FALSE)
     pre_installed <- pre_installed[nzchar(pre_installed)]
     all_pkgs <- setdiff(all_pkgs, pre_installed)
+    github_specs <- github_specs[!github_names %in% pre_installed]
 
-    if (length(all_pkgs) == 0) {
+    if (length(all_pkgs) == 0 && length(github_specs) == 0) {
       if (verbose) cli::cli_alert_info("All dependencies already present in bundled R library")
     } else {
       if (verbose) {
-        cli::cli_alert_info("Installing {length(all_pkgs)} package{?s} into bundled library")
+        install_count <- length(all_pkgs) + length(github_specs)
+        cli::cli_alert_info("Installing {install_count} package{?s} into bundled library")
       }
 
-      pkg_str <- paste0("'", all_pkgs, "'", collapse = ", ")
-      repo_str <- paste0("'", repos, "'", collapse = ", ")
+      r_literal <- function(x) {
+        paste(deparse(as.character(x), width.cutoff = 500L), collapse = "")
+      }
       # type = "binary" is unsupported on Linux (.Platform$pkgType ==
       # "source"); only request it on the platforms that accept it.
       # Keyed on the build HOST pkgType (detect_current_platform()), not the
@@ -130,21 +137,47 @@ embed_r_runtime <- function(output_dir, packages, repos, version,
       } else {
         "type = 'binary', "
       }
-      # Use the bundled library as both destination AND the only lib on
-      # .libPaths, which avoids install.packages getting confused by
-      # packages the caller's R_LIBS_USER may have inherited.
-      r_code <- sprintf(
-        paste0(
-          ".libPaths('%s'); ",
-          "install.packages(c(%s), lib = '%s', repos = c(%s), ",
-          "%sdependencies = FALSE, quiet = TRUE)"
-        ),
-        gsub("\\\\", "/", lib_path),
-        pkg_str,
-        gsub("\\\\", "/", lib_path),
-        repo_str,
-        type_clause
+      # Use the bundled library as both destination AND the first lib on
+      # .libPaths. GitHub references are installed with pak; ordinary package
+      # names retain the existing install.packages path.
+      lib_literal <- r_literal(gsub("\\\\", "/", lib_path))
+      repo_literal <- r_literal(repos)
+      r_steps <- c(
+        sprintf(".libPaths(%s)", lib_literal),
+        sprintf("options(repos = %s)", repo_literal)
       )
+      if (length(all_pkgs) > 0) {
+        r_steps <- c(r_steps, sprintf(
+          paste0(
+            "install.packages(%s, lib = %s, repos = %s, ",
+            "%sdependencies = FALSE, quiet = TRUE)"
+          ),
+          r_literal(all_pkgs), lib_literal, repo_literal, type_clause
+        ))
+      }
+      if (length(github_specs) > 0) {
+        r_steps <- c(
+          r_steps,
+          sprintf(
+            paste0(
+              "if (!requireNamespace('pak', quietly = TRUE, lib.loc = %s)) ",
+              "install.packages('pak', lib = %s, repos = %s, %squiet = TRUE)"
+            ),
+            lib_literal, lib_literal, repo_literal, type_clause
+          ),
+          sprintf(
+            paste0(
+              "if (!nzchar(Sys.getenv('GITHUB_PAT')) && nzchar(Sys.getenv('GH_TOKEN'))) ",
+              "Sys.setenv(GITHUB_PAT = Sys.getenv('GH_TOKEN'))"
+            )
+          ),
+          sprintf(
+            "pak::pkg_install(%s, lib = %s, dependencies = NA, upgrade = FALSE, ask = FALSE)",
+            r_literal(github_specs), lib_literal
+          )
+        )
+      }
+      r_code <- paste(r_steps, collapse = "; ")
 
       # Pre-session code didn't scrub env or pass --vanilla and worked
       # fine -- the bundled library being a sibling (not the R's own
@@ -162,7 +195,8 @@ embed_r_runtime <- function(output_dir, packages, repos, version,
       # than "no package called 'htmltools'" from a running Shiny server.
       present <- c(pre_installed,
                    list.dirs(lib_path, recursive = FALSE, full.names = FALSE))
-      missing_pkgs <- setdiff(pkgs, present)
+      expected_pkgs <- unique(c(cran_pkgs, github_names))
+      missing_pkgs <- setdiff(expected_pkgs, present)
       if (length(missing_pkgs) > 0) {
         cli::cli_abort(c(
           "Failed to install bundled R packages: {paste(missing_pkgs, collapse = ', ')}",

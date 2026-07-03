@@ -75,10 +75,14 @@ generate_dependency_manifest <- function(packages, language,
   # distribution per call, so query Debian/Ubuntu and Fedora/RedHat separately.
   # as.list() forces JSON array shape so the JS consumer can iterate even when
   # a distro has exactly one system package.
-  if (language == "r" && length(packages) > 0) {
+  cran_packages <- packages
+  if (language == "r") {
+    cran_packages <- packages[!is_github_r_package(packages)]
+  }
+  if (language == "r" && length(cran_packages) > 0) {
     manifest$system_deps <- list(
-      debian = as.list(query_sysreqs(packages, "ubuntu", "24.04")),
-      fedora = as.list(query_sysreqs(packages, "redhat", "9"))
+      debian = as.list(query_sysreqs(cran_packages, "ubuntu", "24.04")),
+      fedora = as.list(query_sysreqs(cran_packages, "redhat", "9"))
     )
   }
 
@@ -108,6 +112,14 @@ resolve_app_dependencies <- function(appdir, app_type, runtime_strategy, config)
   if (grepl("^r-", app_type)) {
     detected <- detect_r_dependencies(appdir)
     merged <- merge_r_dependencies(detected, config_deps)
+    github_specs <- merged$packages[is_github_r_package(merged$packages)]
+    if (length(github_specs) > 0 && runtime_strategy != "bundled") {
+      cli::cli_abort(c(
+        "GitHub R packages currently require the bundled runtime strategy",
+        "i" = "Set {.code runtime_strategy = \"bundled\"} in {.code export()}.",
+        "i" = "GitHub package: {github_specs[1]}"
+      ))
+    }
     list(
       language = "r",
       packages = merged$packages,
