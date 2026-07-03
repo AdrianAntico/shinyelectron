@@ -48,6 +48,31 @@ get_npm_command <- function(prefer_local = TRUE) {
   }
 }
 
+#' Environment for Node.js and npm child processes
+#'
+#' npm can be launched by its absolute path, but package lifecycle scripts
+#' invoke `node` by name. Ensure a shinyelectron-managed Node.js directory is
+#' therefore also present on PATH for npm and every process it starts.
+#'
+#' @return A named character vector suitable for the `env` argument of
+#'   [processx::run()] and `run_command_safe()`, or NULL when Node.js cannot be
+#'   resolved.
+#' @keywords internal
+nodejs_subprocess_env <- function() {
+  node_cmd <- get_node_command(prefer_local = TRUE)
+  node_path <- if (fs::file_exists(node_cmd)) node_cmd else Sys.which(node_cmd)
+
+  if (!nzchar(node_path)) return(NULL)
+
+  node_dir <- dirname(fs::path_abs(node_path))
+  current_path <- Sys.getenv("PATH")
+  path_entries <- strsplit(current_path, .Platform$path.sep, fixed = TRUE)[[1]]
+
+  if (node_dir %in% path_entries) return(NULL)
+
+  c(PATH = paste(node_dir, current_path, sep = .Platform$path.sep))
+}
+
 #' Set development environment variables
 #'
 #' @param port Integer port number
