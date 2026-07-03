@@ -8,7 +8,7 @@
 #' @return Invisibly returns a list with diagnostic information.
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
 #' # Check system requirements
 #' sitrep_electron_system()
 #'
