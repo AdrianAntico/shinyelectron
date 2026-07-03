@@ -649,6 +649,9 @@ validate_config_file <- function(config_path) {
 #' @return Invisibly returns the merged configuration list.
 #'
 #' @examples
+#' # Show the merged configuration for a bundled example app
+#' show_config(example_app("r"))
+#'
 #' \dontrun{
 #' show_config("path/to/my/app")
 #' }
