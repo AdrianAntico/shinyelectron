@@ -62,9 +62,9 @@ test_that("embed_r_runtime resolves the recursive closure minus pre_installed an
   expect_match(r_code, "runtime/R/library", fixed = TRUE)
 
   # Resolved set == recursive closure {shiny,htmltools,rlang} minus pre_installed {rlang}.
-  expect_match(r_code, "'shiny'", fixed = TRUE)
-  expect_match(r_code, "'htmltools'", fixed = TRUE)
-  expect_false(grepl("'rlang'", r_code, fixed = TRUE))
+  expect_match(r_code, '"shiny"', fixed = TRUE)
+  expect_match(r_code, '"htmltools"', fixed = TRUE)
+  expect_false(grepl('"rlang"', r_code, fixed = TRUE))
 })
 
 test_that("embed_r_runtime embeds the interpreter even when packages is empty", {

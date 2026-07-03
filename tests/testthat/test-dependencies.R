@@ -271,6 +271,44 @@ test_that("merge_r_dependencies includes extra_packages", {
   expect_true("shiny" %in% result$packages)
 })
 
+test_that("GitHub R package specs replace their auto-detected package name", {
+  config_deps <- list(
+    auto_detect = TRUE,
+    r = list(
+      packages = list("mypkg=github::me/my-repository@v1.2.0"),
+      repos = list("https://cloud.r-project.org")
+    )
+  )
+
+  result <- merge_r_dependencies(c("shiny", "mypkg"), config_deps)
+
+  expect_true("shiny" %in% result$packages)
+  expect_false("mypkg" %in% result$packages)
+  expect_true("mypkg=github::me/my-repository@v1.2.0" %in% result$packages)
+  expect_equal(
+    github_r_package_name("mypkg=github::me/my-repository@v1.2.0"),
+    "mypkg"
+  )
+})
+
+test_that("GitHub R package specs require bundled strategy", {
+  skip_if_not_installed("renv")
+  appdir <- withr::local_tempdir()
+  writeLines("library(mypkg)", file.path(appdir, "app.R"))
+  config <- list(dependencies = list(
+    auto_detect = TRUE,
+    r = list(
+      packages = list("mypkg=github::me/my-repository"),
+      repos = list("https://cloud.r-project.org")
+    )
+  ))
+
+  expect_error(
+    resolve_app_dependencies(appdir, "r-shiny", "auto-download", config),
+    "require the bundled runtime"
+  )
+})
+
 test_that("merge_py_dependencies combines detected and declared", {
   detected <- c("pandas", "numpy")
   config_deps <- list(

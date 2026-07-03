@@ -312,6 +312,24 @@ These keys sit under `dependencies.r` and apply to the `bundled`, `auto-download
 | `r.repos` | list of strings | `["https://cloud.r-project.org"]` | CRAN-compatible repository URLs to use when installing R packages |
 | `r.lib_path` | string | `null` | Custom library path where R packages are installed; `null` uses the default R library |
 
+For bundled R apps, `r.packages` also accepts pak-style GitHub references.
+Use an explicit package-name alias when the repository name differs from the
+R package name:
+
+```yaml
+dependencies:
+  r:
+    packages:
+      - github::owner/package
+      - mypkg=github::owner/repository@v1.2.0
+    repos:
+      - https://cloud.r-project.org
+```
+
+The optional `@ref` may be a branch, tag, or commit. Private repositories use
+`GITHUB_PAT` or `GH_TOKEN` from the build environment. GitHub references
+currently require `runtime_strategy: bundled`.
+
 #### Python-specific dependency options
 
 These keys sit under `dependencies.python` and apply to the `bundled`, `auto-download`, and `system` strategies.

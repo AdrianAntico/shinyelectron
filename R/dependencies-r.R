@@ -8,6 +8,31 @@ BASE_R_PACKAGES <- c(
   "spatial", "survival"
 )
 
+#' Identify a GitHub R package reference
+#'
+#' Supports pak-style references such as `github::owner/repo`, an optional
+#' ref (`@v1.2.0`), and an optional package-name alias
+#' (`mypkg=github::owner/repo`).
+#' @keywords internal
+is_github_r_package <- function(x) {
+  grepl("^(?:[^=]+[=])?(?:github::|https?://github[.]com/)", x,
+        perl = TRUE)
+}
+
+#' Infer the installed package name from a GitHub package reference
+#' @keywords internal
+github_r_package_name <- function(x) {
+  aliased <- grepl("=", x, fixed = TRUE)
+  alias <- ifelse(aliased, sub("=.*$", "", x), NA_character_)
+  ref <- sub("^[^=]+=", "", x)
+  ref <- sub("^github::", "", ref)
+  ref <- sub("^https?://github[.]com/", "", ref)
+  ref <- sub("[?#].*$", "", ref)
+  ref <- sub("@[^/]*$", "", ref)
+  repo <- basename(ref)
+  ifelse(aliased, alias, repo)
+}
+
 #' Detect R package dependencies from source files
 #'
 #' Uses `renv::dependencies()` to scan R source files for package
@@ -57,6 +82,11 @@ merge_r_dependencies <- function(detected, config_deps) {
 
   declared <- unlist(config_deps$r$packages %||% list())
   extra <- unlist(config_deps$extra_packages %||% list())
+
+  github_specs <- c(declared, extra)
+  github_specs <- github_specs[is_github_r_package(github_specs)]
+  github_names <- github_r_package_name(github_specs)
+  detected <- setdiff(detected, github_names)
 
   packages <- if (isTRUE(config_deps$auto_detect %||% TRUE)) {
     sort(unique(c(detected, declared, extra)))
