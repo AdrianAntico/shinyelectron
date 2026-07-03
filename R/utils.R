@@ -116,6 +116,24 @@ validate_slug <- function(slug) {
 #' @keywords internal
 run_command_safe <- function(command, args = character(), timeout = 30,
                              env = NULL) {
+  # On some Windows/R/processx combinations, asking processx to spawn a
+  # nonexistent executable can terminate the R process before tryCatch gets a
+  # chance to handle the error. Resolve the executable in R first so a missing
+  # optional tool is always an ordinary diagnostic result.
+  command_has_path <- grepl("[/\\\\]", command)
+  command_exists <- if (command_has_path) {
+    file.exists(command)
+  } else {
+    nzchar(Sys.which(command))
+  }
+  if (!command_exists) {
+    return(list(
+      status = 127L,
+      stdout = "",
+      stderr = paste0("Command not found: ", command)
+    ))
+  }
+
   tryCatch(
     processx::run(command, args, env = env,
                   error_on_status = FALSE, timeout = timeout),
