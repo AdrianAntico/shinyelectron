@@ -88,6 +88,7 @@ run_electron_app <- function(app_dir, port = 3000, open_devtools = TRUE, verbose
       command = get_npm_command(),
       args = c("run", "electron"),
       wd = app_dir,
+      env = get_node_npm_env(),
       echo = verbose,
       echo_cmd = verbose,
       spinner = verbose,

@@ -48,6 +48,26 @@ get_npm_command <- function(prefer_local = TRUE) {
   }
 }
 
+#' Get environment variables for Node.js/npm commands
+#'
+#' Ensures npm child processes can resolve `node` when using a
+#' shinyelectron-managed Node.js installation that is not on PATH.
+#'
+#' @param prefer_local Logical. Whether to prefer the local shinyelectron-managed
+#'   installation over the system installation. Default TRUE.
+#' @return Named character vector of environment variables for processx.
+#' @keywords internal
+get_node_npm_env <- function(prefer_local = TRUE) {
+  node_cmd <- get_node_command(prefer_local = prefer_local)
+  node_dir <- dirname(node_cmd)
+
+  if (!nzchar(node_dir) || !fs::dir_exists(node_dir)) {
+    return(character())
+  }
+
+  c(PATH = paste(c(node_dir, Sys.getenv("PATH")), collapse = .Platform$path.sep))
+}
+
 #' Set development environment variables
 #'
 #' @param port Integer port number
