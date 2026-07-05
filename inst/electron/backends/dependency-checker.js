@@ -3,6 +3,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { checkManifestSchema } = require('./utils');
 
 /**
@@ -113,12 +114,108 @@ print(json.dumps(missing))
  * @param {function} onProgress - Callback: (packageName, index, total) => void
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-function installR(packages, repos, rscript, libPath, onProgress) {
+function installR(packages, repos, rscript, libPath, onProgress, packageSources = {}) {
+  return installRWithSources(packages, repos, rscript, libPath, onProgress, packageSources);
+}
+
+function rString(value) {
+  return `"${String(value || '').replace(/\\/g, '/').replace(/"/g, '\\"')}"`;
+}
+
+function rLibSetupCode(libPath) {
+  const requestedLib = libPath ? rString(libPath) : 'NULL';
+  return [
+    `lib <- ${requestedLib}`,
+    `if (is.null(lib) || !nzchar(lib)) lib <- Sys.getenv("R_LIBS_USER")`,
+    `if (!nzchar(lib)) lib <- file.path(path.expand("~"), "R", paste0(R.version$platform, "-library"), paste(R.version$major, strsplit(R.version$minor, ".", fixed = TRUE)[[1]][1], sep = "."))`,
+    `dir.create(lib, recursive = TRUE, showWarnings = FALSE)`,
+    `.libPaths(unique(c(lib, .libPaths())))`
+  ].join('; ');
+}
+
+function normalizeSourceOverride(pkg, packageSources) {
+  const override = packageSources && packageSources[pkg] ? packageSources[pkg] : null;
+  if (!override || typeof override !== 'object') {
+    return { source: 'cran', fallback_to_cran: true, force: false };
+  }
+
+  const source = String(override.source || 'cran').toLowerCase();
+  return {
+    source,
+    path: override.path || null,
+    url: override.url || null,
+    install_opts: Array.isArray(override.install_opts) ? override.install_opts : [],
+    repo: override.repo || override.github || null,
+    ref: override.ref || null,
+    fallback_to_cran: override.fallback_to_cran === true,
+    force: override.force === true
+  };
+}
+
+function rValidationCode(safePkg, sourceLabel, commandLabel) {
+  const checks = {
+    AutoPlots: ['Line', 'Bar', 'CorrMatrix'],
+    AutoQuant: [
+      'generate_eda_artifacts',
+      'generate_model_assessment_artifacts',
+      'generate_regression_model_insights_artifacts',
+      'generate_binary_classification_model_insights_artifacts'
+    ]
+  };
+  const fnChecks = checks[safePkg] || [];
+  const fnCode = fnChecks.map(fn =>
+    `if (!exists(${rString(fn)}, envir = asNamespace(pkg), inherits = FALSE)) failed <- c(failed, paste0("missing function: ", ${rString(fn)}))`
+  );
+
+  return [
+    `failed <- character()`,
+    `if (!requireNamespace(pkg, quietly = TRUE)) failed <- c(failed, "requireNamespace failed")`,
+    `if (length(failed) == 0) {`,
+    `  version <- tryCatch(as.character(utils::packageVersion(pkg)), error = function(e) NA_character_)`,
+    `  path_found <- tryCatch(find.package(pkg), error = function(e) NA_character_)`,
+    `  if (is.na(version) || !nzchar(version)) failed <- c(failed, "packageVersion failed")`,
+    `  if (is.na(path_found) || !nzchar(path_found)) failed <- c(failed, "find.package failed")`,
+    ...fnCode.map(line => `  ${line}`),
+    `}`,
+    `if (length(failed) > 0) {`,
+    `  detail <- c("Package validation failed for ${safePkg}", paste0("source: ", ${rString(sourceLabel)}), paste0("command: ", ${rString(commandLabel)}), paste0(".libPaths(): ", paste(.libPaths(), collapse = " | ")))`,
+    `  if (exists("install_error") && length(install_error) && !is.null(install_error)) detail <- c(detail, paste0("install error: ", install_error))`,
+    `  detail <- c(detail, paste0("failed checks: ", paste(failed, collapse = "; ")))`,
+    `  stop(paste(detail, collapse = "\\n"), call. = FALSE)`,
+    `}`,
+    `if (exists("install_error") && length(install_error) && !is.null(install_error)) message("${safePkg} install emitted an error/warning, but validation passed: ", install_error)`,
+    `message("${safePkg} installed with warnings/output; validation passed.")`,
+    `message("Validated ", pkg, " version ", version, " at ", path_found)`,
+    `quit(status = 0, save = "no")`
+  ].join('; ');
+}
+
+function runRScriptCode(rscript, rCode, timeout = 300000) {
+  const tmpFile = path.join(os.tmpdir(), `shinyelectron-r-install-${crypto.randomBytes(8).toString('hex')}.R`);
+  fs.writeFileSync(tmpFile, rCode, 'utf8');
+  try {
+    return execFileSync(rscript, [tmpFile], {
+      timeout,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+  } finally {
+    try { fs.unlinkSync(tmpFile); } catch { /* ignore cleanup errors */ }
+  }
+}
+
+function installRWithSources(packages, repos, rscript, libPath, onProgress, packageSources) {
   return new Promise((resolve) => {
+    const sourceOrder = Object.keys(packageSources || {});
+    const packageSet = new Set(packages);
+    const orderedSourcePackages = sourceOrder.filter(pkg => packageSet.has(pkg));
+    const remainingPackages = packages.filter(pkg => !sourceOrder.includes(pkg));
+    packages = [...orderedSourcePackages, ...remainingPackages];
+
     // Sanitize repo URLs -- only allow URL-safe characters
     const repoStr = repos.map(r => `"${r.replace(/"/g, '')}"`).join(',');
-    // Escape backslashes and double quotes in libPath to prevent R code injection
-    const libArg = libPath ? `, lib="${libPath.replace(/\\/g, '/').replace(/"/g, '\\"')}"` : '';
+    const libSetup = rLibSetupCode(libPath);
+    const libArg = ', lib=lib';
 
     // Create lib directory if needed
     if (libPath) {
@@ -139,20 +236,172 @@ function installR(packages, repos, rscript, libPath, onProgress) {
 
       // Sanitize package name before interpolating into R code
       const safePkg = pkg.replace(/[^a-zA-Z0-9._-]/g, '');
+      const source = normalizeSourceOverride(pkg, packageSources);
       // type="binary" is unsupported on Linux (.Platform$pkgType == "source");
       // let R pick the platform default there to avoid an install error.
       const typeArg = process.platform === 'linux' ? '' : ', type="binary"';
-      const rCode = `install.packages("${safePkg}", repos=c(${repoStr})${typeArg}, quiet=TRUE, dependencies=TRUE${libArg})`;
+      let rCode;
+      let sourceLabel = 'cran';
+      let commandLabel = `install.packages("${safePkg}")`;
+
+      if (source.source === 'local') {
+        if (!source.path) {
+          resolve({
+            success: false,
+            error: `${pkg} is configured as a local dependency but no path was supplied. CRAN fallback is disabled.`
+          });
+          return;
+        }
+        const friendly = pkg === 'AutoQuant'
+          ? `${pkg} is configured as a local dependency but the path does not exist: ${source.path}. AutoQuant is not available on CRAN and CRAN fallback is disabled.`
+          : `${pkg} is configured as a local dependency but the path does not exist: ${source.path}. CRAN fallback is disabled.`;
+        console.log(`[shinyelectron] Installing ${safePkg} from local path: ${source.path}`);
+        console.log(`[shinyelectron] ${safePkg} source=local fallback_to_cran=${source.fallback_to_cran}`);
+        sourceLabel = `local:${source.path}`;
+        commandLabel = `remotes::install_local(path = ${source.path})`;
+        rCode = [
+          `pkg <- ${rString(safePkg)}`,
+          `path <- ${rString(source.path)}`,
+          libSetup,
+          `if (!file.exists(path) && !dir.exists(path)) stop(${rString(friendly)}, call. = FALSE)`,
+          `if (requireNamespace(pkg, quietly = TRUE)) { desc <- utils::packageDescription(pkg); message("Installed ", pkg, " version ", desc$Version, " at ", find.package(pkg)) }`,
+          `message("Installing ${safePkg} from local path: ", path)`,
+          `message("CRAN fallback ${source.fallback_to_cran ? 'enabled' : 'disabled'}")`,
+          `if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes", repos=c(${repoStr}), quiet=TRUE, dependencies=TRUE, lib=lib)`,
+          `install_error <- NULL`,
+          `tryCatch(remotes::install_local(path = path, dependencies = TRUE, upgrade = "never", force = ${source.force ? 'TRUE' : 'FALSE'}, lib = lib), error = function(e) {`,
+          source.fallback_to_cran
+            ? `  tryCatch(install.packages(pkg, repos=c(${repoStr})${typeArg}, quiet=TRUE, dependencies=TRUE${libArg}), error = function(e2) install_error <<- paste(conditionMessage(e), conditionMessage(e2), sep = "; "))`
+            : `  install_error <<- paste("Failed to install ${safePkg} from local path ${source.path}. CRAN fallback is disabled for this package.", conditionMessage(e))`,
+          `})`,
+          rValidationCode(safePkg, sourceLabel, commandLabel)
+        ].join('; ');
+      } else if (source.source === 'github') {
+        if (!source.repo) {
+          resolve({
+            success: false,
+            error: `${pkg} is configured as a GitHub dependency but no repo was supplied. CRAN fallback is disabled.`
+          });
+          return;
+        }
+        const refArg = source.ref ? `, ref = ${rString(source.ref)}` : '';
+        console.log(`[shinyelectron] Installing ${safePkg} from GitHub: ${source.repo}`);
+        console.log(`[shinyelectron] ${safePkg} source=github fallback_to_cran=${source.fallback_to_cran}`);
+        sourceLabel = `github:${source.repo}${source.ref ? '@' + source.ref : ''}`;
+        commandLabel = `remotes::install_github(repo = ${source.repo}${source.ref ? ', ref = ' + source.ref : ''})`;
+        rCode = [
+          `pkg <- ${rString(safePkg)}`,
+          `repo <- ${rString(source.repo)}`,
+          libSetup,
+          `if (requireNamespace(pkg, quietly = TRUE)) { desc <- utils::packageDescription(pkg); message("Installed ", pkg, " version ", desc$Version, " at ", find.package(pkg)) }`,
+          `message("Installing ${safePkg} from GitHub: ", repo)`,
+          `message("CRAN fallback ${source.fallback_to_cran ? 'enabled' : 'disabled'}")`,
+          `if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes", repos=c(${repoStr}), quiet=TRUE, dependencies=TRUE, lib=lib)`,
+          `install_error <- NULL`,
+          `tryCatch(remotes::install_github(repo = repo${refArg}, dependencies = TRUE, upgrade = "never", force = ${source.force ? 'TRUE' : 'FALSE'}, lib = lib), error = function(e) {`,
+          source.fallback_to_cran
+            ? `  tryCatch(install.packages(pkg, repos=c(${repoStr})${typeArg}, quiet=TRUE, dependencies=TRUE${libArg}), error = function(e2) install_error <<- paste(conditionMessage(e), conditionMessage(e2), sep = "; "))`
+            : `  install_error <<- paste("Failed to install ${safePkg} from GitHub repo ${source.repo}. CRAN fallback is disabled for this package.", conditionMessage(e))`,
+          `})`,
+          rValidationCode(safePkg, sourceLabel, commandLabel)
+        ].join('; ');
+      } else if (source.source === 'url') {
+        if (!source.url) {
+          resolve({
+            success: false,
+            error: `${pkg} is listed in URL_Packages but no URL was supplied.`
+          });
+          return;
+        }
+        const opts = source.install_opts || [];
+        const optsCode = opts.length > 0
+          ? `c(${opts.map(rString).join(', ')})`
+          : 'NULL';
+        console.log(`[shinyelectron] Installing ${safePkg} from URL package: ${source.url}`);
+        console.log(`[shinyelectron] ${safePkg} source=url fallback_to_cran=false`);
+        sourceLabel = `url:${source.url}`;
+        commandLabel = `install.packages(url, repos = NULL, type = "source")`;
+        rCode = [
+          `pkg <- ${rString(safePkg)}`,
+          `url <- ${rString(source.url)}`,
+          libSetup,
+          `if (requireNamespace(pkg, quietly = TRUE)) { desc <- utils::packageDescription(pkg); message("Installed ", pkg, " version ", desc$Version, " at ", find.package(pkg)) }`,
+          `message("Installing ${safePkg} from URL package: ", url)`,
+          `message("CRAN fallback disabled")`,
+          `install_error <- NULL`,
+          `tryCatch(install.packages(url, repos = NULL, type = "source", INSTALL_opts = ${optsCode}${libArg}), error = function(e) install_error <<- paste("${safePkg} is listed in URL_Packages but installation from ${source.url} failed.", conditionMessage(e)))`,
+          rValidationCode(safePkg, sourceLabel, commandLabel)
+        ].join('; ');
+      } else if (source.source === 'none' || source.source === 'already_installed') {
+        console.log(`[shinyelectron] Checking ${safePkg}; source=${source.source}; CRAN fallback disabled`);
+        sourceLabel = source.source;
+        commandLabel = 'already-installed validation';
+        rCode = [
+          `pkg <- ${rString(safePkg)}`,
+          libSetup,
+          `if (!requireNamespace("${safePkg}", quietly = TRUE)) stop("${safePkg} is configured as already installed, but it is not available. CRAN fallback is disabled.", call. = FALSE)`,
+          rValidationCode(safePkg, sourceLabel, commandLabel)
+        ].join('; ');
+      } else {
+        console.log(`[shinyelectron] Installing ${safePkg} from CRAN repositories`);
+        sourceLabel = 'cran';
+        commandLabel = `install.packages("${safePkg}")`;
+        rCode = [
+          `pkg <- ${rString(safePkg)}`,
+          libSetup,
+          `install_error <- NULL`,
+          `tryCatch(install.packages("${safePkg}", repos=c(${repoStr})${typeArg}, quiet=TRUE, dependencies=TRUE${libArg}), error = function(e) install_error <<- conditionMessage(e))`,
+          rValidationCode(safePkg, sourceLabel, commandLabel)
+        ].join('; ');
+      }
 
       try {
-        execFileSync(rscript, ['-e', rCode], {
-          timeout: 300000,
-          stdio: 'ignore'
-        });
+        const output = runRScriptCode(rscript, rCode, 300000);
+        if (output && output.trim()) {
+          console.log(output.trim());
+        }
         completed++;
         installNext();
       } catch (err) {
-        resolve({ success: false, error: `Failed to install ${pkg}: ${err.message}` });
+        const stdout = err.stdout ? err.stdout.toString().trim() : '';
+        const stderr = err.stderr ? err.stderr.toString().trim() : '';
+        const validationCode = [
+          `pkg <- ${rString(safePkg)}`,
+          libSetup,
+          `install_error <- "Installer process exited non-zero after install output; validation-only retry is checking package availability."`,
+          rValidationCode(safePkg, sourceLabel, commandLabel)
+        ].join('; ');
+        try {
+          const validationOutput = runRScriptCode(rscript, validationCode, 60000);
+          console.warn(`[shinyelectron] ${safePkg} installer exited non-zero, but post-install validation passed.`);
+          if (stdout) console.warn(stdout);
+          if (stderr) console.warn(stderr);
+          if (validationOutput && validationOutput.trim()) {
+            console.log(validationOutput.trim());
+          }
+          completed++;
+          installNext();
+          return;
+        } catch (validationErr) {
+          const validationStdout = validationErr.stdout ? validationErr.stdout.toString().trim() : '';
+          const validationStderr = validationErr.stderr ? validationErr.stderr.toString().trim() : '';
+          if (validationStdout || validationStderr) {
+            console.warn([
+              `[shinyelectron] ${safePkg} validation-only retry failed.`,
+              validationStdout ? `validation output:\n${validationStdout}` : '',
+              validationStderr ? `validation errors:\n${validationStderr}` : ''
+            ].filter(Boolean).join('\n\n'));
+          }
+        }
+        const pieces = [
+          `source: ${sourceLabel}`,
+          `command: ${commandLabel}`,
+          stdout ? `install output:\n${stdout}` : '',
+          stderr ? `install/validation errors:\n${stderr}` : '',
+          err.message ? `process error: ${err.message}` : ''
+        ].filter(Boolean);
+        const detail = pieces.join('\n\n');
+        resolve({ success: false, error: `Failed to install ${pkg}: ${detail}` });
       }
     }
 

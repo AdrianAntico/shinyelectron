@@ -26,6 +26,16 @@
 #' @param run_after Logical. Whether to run the application in development mode after export. Default is FALSE.
 #' @param open_after Logical. Whether to open the generated project directory after export. Default is FALSE.
 #' @param verbose Logical. Whether to display detailed progress information. Default is TRUE.
+#' @param GitHub_Packages Named character vector mapping R package names to
+#'   GitHub repositories (`owner/repo`) for runtime dependency installation.
+#' @param GitHub_Refs Optional named character vector mapping package names to
+#'   Git refs used with `GitHub_Packages`.
+#' @param URL_Packages Named character vector mapping R package names to source
+#'   package URLs for runtime dependency installation.
+#' @param URL_INSTALL_opts Optional named list mapping URL package names to
+#'   `INSTALL_opts` character vectors.
+#' @param Local_Packages Named character vector mapping R package names to local
+#'   package directories or source archives.
 #'
 #' @return List containing paths to the converted app and built Electron app (if built).
 #'
@@ -75,7 +85,10 @@ export <- function(appdir, destdir, app_name = NULL, app_type = NULL,
                    runtime_strategy = NULL, sign = FALSE,
                    platform = NULL, arch = NULL, icon = NULL,
                    overwrite = FALSE, build = TRUE, run_after = FALSE,
-                   open_after = FALSE, verbose = TRUE) {
+                   open_after = FALSE, verbose = TRUE,
+                   GitHub_Packages = NULL, GitHub_Refs = NULL,
+                   URL_Packages = NULL, URL_INSTALL_opts = NULL,
+                   Local_Packages = NULL) {
 
   # Expand ~ in paths before passing to external tools (Python, npm, etc.)
   appdir <- path.expand(appdir)
@@ -97,6 +110,14 @@ export <- function(appdir, destdir, app_name = NULL, app_type = NULL,
   # Read config file (or get defaults) -- must happen before structure
   # validation so multi-app mode can be detected early
   config <- read_config(appdir)
+  config <- apply_r_dependency_source_args(
+    config,
+    GitHub_Packages = GitHub_Packages,
+    GitHub_Refs = GitHub_Refs,
+    URL_Packages = URL_Packages,
+    URL_INSTALL_opts = URL_INSTALL_opts,
+    Local_Packages = Local_Packages
+  )
 
   # Resolve the icon: function arg > config `icon:` > per-platform `icons:`.
   # Wiring the YAML keys here makes them effective for both single and

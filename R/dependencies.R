@@ -56,7 +56,8 @@ query_sysreqs <- function(pkgs, distribution = "ubuntu", release = "24.04") {
 #' @return Character string of JSON content.
 #' @keywords internal
 generate_dependency_manifest <- function(packages, language,
-                                         repos = NULL, index_urls = NULL) {
+                                         repos = NULL, index_urls = NULL,
+                                         dependency_sources = NULL) {
   package_sources <- packages
   runtime_packages <- packages
   if (language == "r") {
@@ -75,6 +76,9 @@ generate_dependency_manifest <- function(packages, language,
 
   if (language == "r") {
     manifest$repos <- repos %||% SHINYELECTRON_DEFAULTS$dependencies$r$repos
+    if (!is.null(dependency_sources) && length(dependency_sources)) {
+      manifest$dependency_sources <- dependency_sources
+    }
   } else if (language == "python") {
     manifest$index_urls <- index_urls %||%
       SHINYELECTRON_DEFAULTS$dependencies$python$index_urls
@@ -87,6 +91,13 @@ generate_dependency_manifest <- function(packages, language,
   cran_packages <- package_sources
   if (language == "r") {
     cran_packages <- package_sources[!is_pak_r_package(package_sources)]
+    if (!is.null(dependency_sources) && length(dependency_sources)) {
+      source_names <- names(dependency_sources)
+      non_cran_sources <- vapply(dependency_sources, function(entry) {
+        !identical(entry$source, "cran")
+      }, logical(1))
+      cran_packages <- setdiff(cran_packages, source_names[non_cran_sources])
+    }
   }
   if (language == "r" && length(cran_packages) > 0) {
     manifest$system_deps <- list(
@@ -136,6 +147,10 @@ resolve_app_dependencies <- function(appdir, app_type, runtime_strategy, config)
     detected <- detect_r_dependencies(appdir)
     merged <- merge_r_dependencies(detected, config_deps)
     merged$packages <- resolve_local_r_packages(merged$packages, appdir)
+    merged$dependency_sources <- resolve_r_dependency_source_paths(
+      merged$dependency_sources,
+      appdir
+    )
     pak_specs <- merged$packages[is_pak_r_package(merged$packages)]
     if (length(pak_specs) > 0 && runtime_strategy != "bundled") {
       cli::cli_abort(c(
@@ -147,7 +162,8 @@ resolve_app_dependencies <- function(appdir, app_type, runtime_strategy, config)
     list(
       language = "r",
       packages = merged$packages,
-      repos = merged$repos
+      repos = merged$repos,
+      dependency_sources = merged$dependency_sources
     )
   } else {
     detected <- detect_py_dependencies(appdir)

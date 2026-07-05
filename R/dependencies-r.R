@@ -131,16 +131,206 @@ merge_r_dependencies <- function(detected, config_deps) {
 
   declared <- unlist(config_deps$r$packages %||% list())
   extra <- unlist(config_deps$extra_packages %||% list())
+  explicit <- r_dependency_source_package_names(config_deps)
 
-  pak_specs <- c(declared, extra)
+  pak_specs <- c(declared, extra, explicit)
   pak_specs <- pak_specs[is_pak_r_package(pak_specs)]
   detected <- setdiff(detected, r_package_name(pak_specs))
 
   packages <- if (isTRUE(config_deps$auto_detect %||% TRUE)) {
-    sort(unique(c(detected, declared, extra)))
+    sort(unique(c(detected, declared, extra, explicit)))
   } else {
-    sort(unique(c(declared, extra)))
+    sort(unique(c(declared, extra, explicit)))
   }
 
-  list(packages = packages, repos = repos)
+  list(
+    packages = packages,
+    repos = repos,
+    dependency_sources = r_dependency_source_overrides(config_deps)
+  )
+}
+
+#' Apply explicit R dependency source arguments to config
+#' @keywords internal
+apply_r_dependency_source_args <- function(config,
+                                           GitHub_Packages = NULL,
+                                           GitHub_Refs = NULL,
+                                           URL_Packages = NULL,
+                                           URL_INSTALL_opts = NULL,
+                                           Local_Packages = NULL) {
+  config$dependencies <- config$dependencies %||% SHINYELECTRON_DEFAULTS$dependencies
+
+  check_named_character <- function(x, arg) {
+    if (is.null(x)) return(NULL)
+    if (!is.character(x) || is.null(names(x)) || any(!nzchar(names(x)))) {
+      cli::cli_abort("{.arg {arg}} must be a named character vector.")
+    }
+    x
+  }
+  GitHub_Packages <- check_named_character(GitHub_Packages, "GitHub_Packages")
+  GitHub_Refs <- check_named_character(GitHub_Refs, "GitHub_Refs")
+  URL_Packages <- check_named_character(URL_Packages, "URL_Packages")
+  Local_Packages <- check_named_character(Local_Packages, "Local_Packages")
+
+  if (!is.null(URL_INSTALL_opts) &&
+      (!is.list(URL_INSTALL_opts) || is.null(names(URL_INSTALL_opts)))) {
+    cli::cli_abort("{.arg URL_INSTALL_opts} must be a named list.")
+  }
+
+  if (!is.null(GitHub_Packages)) config$dependencies$GitHub_Packages <- as.list(GitHub_Packages)
+  if (!is.null(GitHub_Refs)) config$dependencies$GitHub_Refs <- as.list(GitHub_Refs)
+  if (!is.null(URL_Packages)) config$dependencies$URL_Packages <- as.list(URL_Packages)
+  if (!is.null(URL_INSTALL_opts)) config$dependencies$URL_INSTALL_opts <- URL_INSTALL_opts
+  if (!is.null(Local_Packages)) config$dependencies$Local_Packages <- as.list(Local_Packages)
+
+  config
+}
+
+#' Package names declared through explicit dependency source maps
+#' @keywords internal
+r_dependency_source_package_names <- function(config_deps) {
+  unique(c(
+    names(config_deps$GitHub_Packages %||% list()),
+    names(config_deps$URL_Packages %||% list()),
+    names(config_deps$Local_Packages %||% list())
+  ))
+}
+
+#' Extract per-package R dependency source overrides from config
+#'
+#' Supports app-level entries such as:
+#' dependencies:
+#'   AutoPlots:
+#'     source: local
+#'     path: C:/path/to/AutoPlots
+#'     fallback_to_cran: false
+#'     force: true
+#' @keywords internal
+r_dependency_source_overrides <- function(config_deps) {
+  overrides <- list()
+
+  add_github <- function(package_name) {
+    ref <- if (package_name %in% names(config_deps$GitHub_Refs %||% list())) {
+      unname(unlist(config_deps$GitHub_Refs[[package_name]]))
+    } else {
+      NULL
+    }
+    overrides[[package_name]] <<- Filter(Negate(is.null), list(
+      source = "github",
+      repo = unname(unlist(config_deps$GitHub_Packages[[package_name]])),
+      ref = ref,
+      fallback_to_cran = FALSE,
+      force = TRUE
+    ))
+  }
+  add_url <- function(package_name) {
+    opts <- NULL
+    if (package_name %in% names(config_deps$URL_INSTALL_opts %||% list())) {
+      opts <- unlist(config_deps$URL_INSTALL_opts[[package_name]], use.names = FALSE)
+    }
+    overrides[[package_name]] <<- NULL
+    overrides[[package_name]] <<- list(
+      source = "url",
+      url = unname(unlist(config_deps$URL_Packages[[package_name]])),
+      install_opts = as.list(opts %||% character()),
+      fallback_to_cran = FALSE,
+      force = FALSE
+    )
+  }
+  add_local <- function(package_name) {
+    overrides[[package_name]] <<- NULL
+    overrides[[package_name]] <<- list(
+      source = "local",
+      path = unname(unlist(config_deps$Local_Packages[[package_name]])),
+      fallback_to_cran = FALSE,
+      force = TRUE
+    )
+  }
+
+  for (package_name in names(config_deps$GitHub_Packages %||% list())) add_github(package_name)
+  for (package_name in names(config_deps$URL_Packages %||% list())) add_url(package_name)
+  for (package_name in names(config_deps$Local_Packages %||% list())) add_local(package_name)
+
+  known <- c(
+    "auto_detect", "r", "python", "electron", "system_packages",
+    "extra_packages", "GitHub_Packages", "GitHub_Refs",
+    "URL_Packages", "URL_INSTALL_opts", "Local_Packages"
+  )
+  package_keys <- setdiff(names(config_deps %||% list()), known)
+  for (package_name in package_keys) {
+    if (package_name %in% names(overrides)) {
+      next
+    }
+    entry <- config_deps[[package_name]]
+    if (!is.list(entry) || is.null(entry$source)) {
+      next
+    }
+
+    source <- tolower(as.character(entry$source))
+    if (!source %in% c("local", "github", "url", "cran", "none", "already_installed")) {
+      cli::cli_abort(c(
+        "Invalid dependency source for {.pkg {package_name}}: {.val {source}}",
+        "i" = "Use one of: local, url, github, cran, none, already_installed."
+      ))
+    }
+
+    overrides[[package_name]] <- list(
+      source = source,
+      path = entry$path %||% NULL,
+      url = entry$url %||% NULL,
+      install_opts = as.list(entry$install_opts %||% character()),
+      repo = entry$repo %||% entry$github %||% NULL,
+      ref = entry$ref %||% NULL,
+      fallback_to_cran = isTRUE(entry$fallback_to_cran),
+      force = isTRUE(entry$force)
+    )
+  }
+
+  overrides
+}
+
+#' Resolve local dependency source paths relative to the app directory
+#' @keywords internal
+resolve_r_dependency_source_paths <- function(dependency_sources, appdir) {
+  if (is.null(dependency_sources) || !length(dependency_sources)) {
+    return(list())
+  }
+
+  for (package_name in names(dependency_sources)) {
+    entry <- dependency_sources[[package_name]]
+    if (!identical(entry$source, "local")) {
+      next
+    }
+
+    package_path <- entry$path
+    if (is.null(package_path) || !nzchar(package_path)) {
+      cli::cli_abort(c(
+        "{.pkg {package_name}} is configured as a local dependency but no path was supplied.",
+        "x" = "{package_name} cannot be installed from CRAN when local source is required."
+      ))
+    }
+
+    if (!fs::is_absolute_path(package_path)) {
+      package_path <- fs::path(appdir, package_path)
+    }
+    package_path <- fs::path_abs(package_path)
+
+    if (!fs::file_exists(package_path) && !fs::dir_exists(package_path)) {
+      msg <- paste0(
+        package_name,
+        " is configured as a local dependency but the path does not exist: ",
+        package_path,
+        ". "
+      )
+      if (identical(package_name, "AutoQuant")) {
+        msg <- paste0(msg, "AutoQuant is not available on CRAN and ")
+      }
+      cli::cli_abort(paste0(msg, "CRAN fallback is disabled."))
+    }
+
+    entry$path <- gsub("\\\\", "/", package_path)
+    dependency_sources[[package_name]] <- entry
+  }
+
+  dependency_sources
 }

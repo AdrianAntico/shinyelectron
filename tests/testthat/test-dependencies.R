@@ -271,6 +271,115 @@ test_that("merge_r_dependencies includes extra_packages", {
   expect_true("shiny" %in% result$packages)
 })
 
+test_that("merge_r_dependencies carries package source overrides", {
+  config_deps <- list(
+    auto_detect = TRUE,
+    GitHub_Packages = list(
+      AutoQuant = "AdrianAntico/AutoQuant",
+      AutoPlots = "AdrianAntico/AutoPlots"
+    ),
+    URL_Packages = list(
+      catboost = "https://github.com/catboost/catboost/releases/download/v1.2/catboost-R-Windows-1.2.tgz"
+    ),
+    URL_INSTALL_opts = list(
+      catboost = c("--no-multiarch", "--no-test-load")
+    ),
+    r = list(
+      packages = list(),
+      repos = list("https://cloud.r-project.org")
+    )
+  )
+
+  result <- merge_r_dependencies(c("AutoPlots", "AutoQuant", "shiny"), config_deps)
+
+  expect_true(all(c("AutoPlots", "AutoQuant", "catboost", "shiny") %in% result$packages))
+  expect_equal(result$dependency_sources$AutoPlots$source, "github")
+  expect_equal(result$dependency_sources$AutoPlots$repo, "AdrianAntico/AutoPlots")
+  expect_false(result$dependency_sources$AutoPlots$fallback_to_cran)
+  expect_equal(result$dependency_sources$catboost$source, "url")
+  expect_equal(unlist(result$dependency_sources$catboost$install_opts), c("--no-multiarch", "--no-test-load"))
+  expect_true(result$dependency_sources$AutoQuant$force)
+})
+
+test_that("explicit dependency source precedence is local, url, github, cran", {
+  config_deps <- list(
+    auto_detect = TRUE,
+    GitHub_Packages = list(
+      AutoPlots = "AdrianAntico/AutoPlots",
+      catboost = "AdrianAntico/not-catboost",
+      onlygithub = "owner/onlygithub"
+    ),
+    URL_Packages = list(
+      AutoPlots = "https://example.invalid/autoplots.tgz",
+      catboost = "https://example.invalid/catboost.tgz"
+    ),
+    Local_Packages = list(
+      AutoPlots = "C:/Users/Bizon/Documents/GitHub/AutoPlots"
+    ),
+    r = list(
+      packages = list(),
+      repos = list("https://cloud.r-project.org")
+    )
+  )
+
+  result <- merge_r_dependencies(c("reactable"), config_deps)
+
+  expect_equal(result$dependency_sources$AutoPlots$source, "local")
+  expect_equal(result$dependency_sources$catboost$source, "url")
+  expect_equal(result$dependency_sources$onlygithub$source, "github")
+  expect_true("reactable" %in% result$packages)
+  expect_false("reactable" %in% names(result$dependency_sources))
+})
+
+test_that("export dependency source args apply to config", {
+  config <- default_config()
+  config <- apply_r_dependency_source_args(
+    config,
+    GitHub_Packages = c(AutoQuant = "AdrianAntico/AutoQuant"),
+    GitHub_Refs = c(AutoQuant = "main"),
+    URL_Packages = c(catboost = "https://example.invalid/catboost.tgz"),
+    URL_INSTALL_opts = list(catboost = c("--no-multiarch", "--no-test-load")),
+    Local_Packages = c(AutoPlots = "C:/Users/Bizon/Documents/GitHub/AutoPlots")
+  )
+
+  expect_equal(config$dependencies$GitHub_Packages$AutoQuant, "AdrianAntico/AutoQuant")
+  expect_equal(config$dependencies$GitHub_Refs$AutoQuant, "main")
+  expect_equal(config$dependencies$URL_Packages$catboost, "https://example.invalid/catboost.tgz")
+  expect_equal(config$dependencies$URL_INSTALL_opts$catboost, c("--no-multiarch", "--no-test-load"))
+  expect_equal(config$dependencies$Local_Packages$AutoPlots, "C:/Users/Bizon/Documents/GitHub/AutoPlots")
+})
+
+test_that("local dependency source paths resolve and fail fast", {
+  appdir <- withr::local_tempdir()
+  pkgdir <- file.path(appdir, "packages", "AutoPlots")
+  dir.create(pkgdir, recursive = TRUE)
+
+  sources <- list(
+    AutoPlots = list(
+      source = "local",
+      path = "packages/AutoPlots",
+      fallback_to_cran = FALSE,
+      force = TRUE
+    )
+  )
+
+  resolved <- resolve_r_dependency_source_paths(sources, appdir)
+  expect_true(grepl("packages/AutoPlots$", resolved$AutoPlots$path))
+
+  missing <- list(
+    AutoQuant = list(
+      source = "local",
+      path = "missing/AutoQuant",
+      fallback_to_cran = FALSE,
+      force = TRUE
+    )
+  )
+  expect_error(
+    resolve_r_dependency_source_paths(missing, appdir),
+    "AutoQuant is configured as a local dependency.*AutoQuant is not available on CRAN.*CRAN fallback is disabled"
+  )
+})
+
 test_that("GitHub R package specs replace their auto-detected package name", {
   config_deps <- list(
     auto_detect = TRUE,
@@ -355,6 +464,46 @@ test_that("generate_dependency_manifest creates valid JSON for R", {
   expect_true("shiny" %in% parsed$packages)
   expect_equal(parsed$repos[[1]], "https://cloud.r-project.org")
   expect_true(parsed$binary_only)
+})
+
+test_that("R manifest includes dependency source overrides", {
+  manifest <- generate_dependency_manifest(
+    packages = c("AutoPlots", "AutoQuant", "catboost", "shiny"),
+    language = "r",
+    repos = list("https://cloud.r-project.org"),
+    dependency_sources = list(
+      AutoPlots = list(
+        source = "local",
+        path = "C:/Users/Bizon/Documents/GitHub/AutoPlots",
+        fallback_to_cran = FALSE,
+        force = TRUE
+      ),
+      AutoQuant = list(
+        source = "github",
+        repo = "AdrianAntico/AutoQuant",
+        fallback_to_cran = FALSE,
+        force = TRUE
+      ),
+      catboost = list(
+        source = "url",
+        url = "https://github.com/catboost/catboost/releases/download/v1.2/catboost-R-Windows-1.2.tgz",
+        install_opts = list("--no-multiarch", "--no-test-load"),
+        fallback_to_cran = FALSE,
+        force = TRUE
+      )
+    )
+  )
+
+  parsed <- jsonlite::fromJSON(manifest, simplifyVector = FALSE)
+  expect_equal(parsed$dependency_sources$AutoPlots$source, "local")
+  expect_equal(parsed$dependency_sources$AutoPlots$path, "C:/Users/Bizon/Documents/GitHub/AutoPlots")
+  expect_false(parsed$dependency_sources$AutoPlots$fallback_to_cran)
+  expect_equal(parsed$dependency_sources$AutoQuant$source, "github")
+  expect_equal(parsed$dependency_sources$AutoQuant$repo, "AdrianAntico/AutoQuant")
+  expect_false(parsed$dependency_sources$AutoQuant$fallback_to_cran)
+  expect_equal(parsed$dependency_sources$catboost$source, "url")
+  expect_equal(unlist(parsed$dependency_sources$catboost$install_opts), c("--no-multiarch", "--no-test-load"))
+  expect_true("shiny" %in% parsed$packages)
 })
 
 test_that("R manifest separates build sources from runtime package names", {

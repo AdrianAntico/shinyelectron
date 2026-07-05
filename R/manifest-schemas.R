@@ -23,6 +23,18 @@
 #'   "package_sources": ["shiny", "mypkg=github::owner/repo"], // optional, R build only
 #'   "binary_only": true,
 #'   "repos": ["https://cloud.r-project.org"],       // R only
+#'   "dependency_sources": {                          // optional, R only
+#'     "AutoPlots": {
+#'       "source": "local" | "url" | "github" | "cran" | "already_installed",
+#'       "path": "C:/path/to/package",                // local only
+#'       "url": "https://.../package.tgz",            // url only
+#'       "repo": "owner/repo",                        // github only
+#'       "ref": "main",                               // github optional
+#'       "install_opts": ["--no-multiarch"],          // url optional
+#'       "fallback_to_cran": false,
+#'       "force": true
+#'     }
+#'   },
 #'   "index_urls": ["https://pypi.org/simple"],      // Python only
 #'   "system_deps": {                                 // optional, R only
 #'     "debian": ["libcurl4-openssl-dev", ...],

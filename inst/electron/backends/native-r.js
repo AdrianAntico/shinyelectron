@@ -334,8 +334,13 @@ class NativeRBackend extends EventEmitter {
       // runtime/R tree does not exist so a bundledLibCheck would always be
       // false -- that dead check has been removed.
       const missing = await checker.checkMissingR(manifest.packages, rscript, libPath);
+      const dependencySources = manifest.dependency_sources || {};
+      const forced = (manifest.packages || []).filter((pkg) =>
+        dependencySources[pkg] && dependencySources[pkg].force === true
+      );
+      const installTargets = Array.from(new Set([...missing, ...forced]));
 
-      if (missing.length > 0) {
+      if (installTargets.length > 0) {
         const promptBeforeInstall = config?.prompt_before_install ?? false;
         const systemDeps = checker.checkSystemDeps(manifest);
 
@@ -343,8 +348,8 @@ class NativeRBackend extends EventEmitter {
           // Emit confirmation request and wait for user action via IPC
           this.emit('status', {
             phase: 'awaiting_install_confirmation',
-            message: `${missing.length} packages need to be installed`,
-            detail: { missing, all: manifest.packages, system_deps: systemDeps }
+            message: `${installTargets.length} packages need to be installed`,
+            detail: { missing: installTargets, all: manifest.packages, system_deps: systemDeps }
           });
 
           await new Promise((resolveInstall, rejectInstall) => {
@@ -356,9 +361,9 @@ class NativeRBackend extends EventEmitter {
               checker.savePreferences(appSlug, { lib_path: data.libPath });
               libPath = chosenPath;
 
-              const result = await checker.installR(missing, manifest.repos || [], rscript, chosenPath, (pkg, idx, total) => {
+              const result = await checker.installR(installTargets, manifest.repos || [], rscript, chosenPath, (pkg, idx, total) => {
                 this.emit('status', { phase: 'installing_packages', message: `Installing ${pkg}...`, detail: { index: idx, total } });
-              });
+              }, dependencySources);
 
               if (!result.success) {
                 this.emit('status', { phase: 'install_error', message: result.error });
@@ -376,9 +381,9 @@ class NativeRBackend extends EventEmitter {
             this.emit('status', { phase: 'checking_packages', message: `System libraries may be needed: ${systemDeps.join(', ')}` });
           }
 
-          const result = await checker.installR(missing, manifest.repos || [], rscript, libPath, (pkg, idx, total) => {
+          const result = await checker.installR(installTargets, manifest.repos || [], rscript, libPath, (pkg, idx, total) => {
             this.emit('status', { phase: 'installing_packages', message: `Installing ${pkg}...`, detail: { index: idx, total } });
-          });
+          }, dependencySources);
 
           if (!result.success) {
             this.emit('status', { phase: 'install_error', message: result.error });

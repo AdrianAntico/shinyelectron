@@ -104,6 +104,47 @@ never be placed in app source, `_shinyelectron.yml`, or an installer.
 Relative local paths and pinned source archives are the simplest reproducible
 option for internal or corporate builds.
 
+You can also pass explicit package source maps to `export()`. Packages listed
+in `Local_Packages`, `URL_Packages`, or `GitHub_Packages` are installed from
+that source and are not installed from CRAN by package name.
+
+``` r
+export(
+  appdir = "C:/Users/Bizon/Documents/GitHub/AnalyticsShinyApp",
+  destdir = "C:/Users/Bizon/Documents/GitHub/AnalyticsShinyApp/build/electron",
+  app_name = "AnalyticsShinyApp",
+  runtime_strategy = "system",
+  GitHub_Packages = c(
+    prettydoc = "AdrianAntico/prettydoc",
+    Rodeo = "AdrianAntico/Rodeo",
+    AutoQuant = "AdrianAntico/AutoQuant",
+    AutoPlots = "AdrianAntico/AutoPlots"
+  ),
+  URL_Packages = c(
+    catboost = "https://github.com/catboost/catboost/releases/download/v1.2/catboost-R-Windows-1.2.tgz"
+  ),
+  URL_INSTALL_opts = list(
+    catboost = c("--no-multiarch", "--no-test-load")
+  )
+)
+```
+
+`Local_Packages` has the highest precedence, then `URL_Packages`, then
+`GitHub_Packages`, then CRAN. For active local development, override the GitHub
+source explicitly:
+
+``` r
+export(
+  appdir = "C:/Users/Bizon/Documents/GitHub/AnalyticsShinyApp",
+  destdir = "C:/Users/Bizon/Documents/GitHub/AnalyticsShinyApp/build/electron",
+  runtime_strategy = "system",
+  Local_Packages = c(
+    AutoPlots = "C:/Users/Bizon/Documents/GitHub/AutoPlots",
+    AutoQuant = "C:/Users/Bizon/Documents/GitHub/AutoQuant"
+  )
+)
+```
+
 ## Install
 
 ```r

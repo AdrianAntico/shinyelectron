@@ -132,7 +132,8 @@ export_multi_app <- function(appdir, destdir, config,
             packages = dep_info$packages,
             language = dep_info$language,
             repos = dep_info$repos,
-            index_urls = dep_info$index_urls
+            index_urls = dep_info$index_urls,
+            dependency_sources = dep_info$dependency_sources
           )
           writeLines(manifest, fs::path(app_dest, "dependencies.json"))
 
