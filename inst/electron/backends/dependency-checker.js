@@ -159,7 +159,13 @@ function rValidationCode(safePkg, sourceLabel, commandLabel) {
       'generate_eda_artifacts',
       'generate_model_assessment_artifacts',
       'generate_regression_model_insights_artifacts',
-      'generate_binary_classification_model_insights_artifacts'
+      'generate_binary_classification_model_insights_artifacts',
+      'RegressionModelInsightsReport',
+      'BinaryClassificationModelInsightsReport',
+      'generate_regression_shap_analysis_artifacts',
+      'generate_binary_classification_shap_analysis_artifacts',
+      'RegressionShapAnalysisReport',
+      'BinaryClassificationShapAnalysisReport'
     ]
   };
   const fnChecks = checks[safePkg] || [];
